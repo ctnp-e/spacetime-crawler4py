@@ -1,12 +1,8 @@
 import re
 from urllib.parse import urlparse
 
-from crawler import worker
-
 def scraper(url, resp):
     links = extract_next_links(url, resp)
-
-    # fun_worker = worker.Worker(0, None, None)
     return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
@@ -25,11 +21,11 @@ def extract_next_links(url, resp):
     if (resp.status != 200):
         return list()
     
+    links = []
     for link in re.findall(r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"', resp.raw_response.content.decode()):
         if is_valid(link):
-            print("  Found link:", link)
-            list.append(link)
-    return list()
+            links.append(link)
+    return links
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
