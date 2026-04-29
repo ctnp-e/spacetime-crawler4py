@@ -1,8 +1,12 @@
 import re
 from urllib.parse import urlparse
 
+from crawler import worker
+
 def scraper(url, resp):
     links = extract_next_links(url, resp)
+
+    # fun_worker = worker.Worker(0, None, None)
     return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
@@ -15,6 +19,16 @@ def extract_next_links(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
+    if (not is_valid(url)):
+        return list()
+
+    if (resp.status != 200):
+        return list()
+    
+    for link in re.findall(r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"', resp.raw_response.content.decode()):
+        if is_valid(link):
+            print("  Found link:", link)
+            list.append(link)
     return list()
 
 def is_valid(url):
@@ -24,6 +38,9 @@ def is_valid(url):
     try:
         parsed = urlparse(url)
         if parsed.scheme not in set(["http", "https"]):
+            return False
+        if not re.match(
+            r"^(.+\.)?(ics|cs|informatics|stat)\.uci\.edu$", parsed.netloc.lower()):
             return False
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
