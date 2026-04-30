@@ -2,6 +2,7 @@ import re
 import atexit
 import hashlib
 from collections import Counter
+from time import strftime
 from urllib.parse import urlparse, urljoin, urlunparse
 from bs4 import BeautifulSoup
 
@@ -32,6 +33,8 @@ unique_pages = set()    # unique URLs seen (fragment-stripped)
 longest_page = ("", 0)  # (url, word_count)
 word_freq = Counter()   # word frequencies across all crawled pages
 subdomains = {}         # netloc -> set of unique page URLs
+
+open("crawl_log.txt", "w").close()  # clear log on each run
 
 
 
@@ -70,9 +73,6 @@ someone said :
 70 subdomains is too little...
 '''
 
-def scraper(url, resp):
-    links = extract_next_links(url, resp)
-    return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
     ''' Filter by content quality, parse and return links '''
@@ -110,11 +110,13 @@ def extract_next_links(url, resp):
 
     words = soup.get_text(separator=" ").split()
 
+    # TODO : TOO HARSH?
     # this is for finding the ratio of annoying empty page with lots of tags. 
     # lowkey it removed too many pages
     # tag_count = len(soup.find_all())
     # useful_ratio = len(words) / tag_count if tag_count > 0 else 0 
 
+    # TODO : TOO HARSH?
     # Low-content checks
     if len(words) < NUM_WORDS : # or useful_ratio < USEFUL_RATIO:
         return []
@@ -126,7 +128,7 @@ def extract_next_links(url, resp):
         return []
     seen_simhashes.append(fingerprint)
 
-    
+    # TODO : TOO HARSH?
     # sig = minhash_signature(words)
     # if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
     #     return []
@@ -142,12 +144,16 @@ def extract_next_links(url, resp):
         if w.isalpha() and w not in STOP_WORDS: # for report
             word_freq[w] += 1
 
+    all_hrefs = soup.find_all("a", href=True)
     links = []
-    for tag in soup.find_all("a", href=True):
+    for tag in all_hrefs:
         link = urljoin(url, tag["href"])
         link = urlunparse(urlparse(link)._replace(fragment=""))
         if is_valid(link):
             links.append(link)
+
+    with open("crawl_log.txt", "a", encoding="utf-8") as f:
+        f.write(f"{strftime('%Y-%m-%d %H:%M:%S')}\t\t{url} -> {len(all_hrefs)} hrefs found, {len(links)} valid\n")
 
     return links
 
