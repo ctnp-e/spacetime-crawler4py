@@ -1,14 +1,21 @@
 import re
+import atexit
 import hashlib
+from collections import Counter
 from urllib.parse import urlparse, urljoin, urlunparse
 from bs4 import BeautifulSoup
 
-NUM_WORDS = 100
-USEFUL_RATIO = 0.8  # minimum words-per-tag; below this = markup-heavy, low info
+# for report
+from stop_words import get_stop_words
 
+NUM_WORDS = 100
+USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
+
+''' For duplicate/near-duplicate detection, we use a combination of:'''
 seen_hashes = set()
 seen_simhashes = []
-SIMHASH_THRESHOLD = 3  # pages differing by <= 3 bits are near-duplicates
+# possibly too harsh.
+SIMHASH_THRESHOLD = 6  # pages differing by <= 6 bits are near-duplicates
 
 # what if we wanted to do...
 # document D1 is a near-duplicate of document D2 if more than
@@ -17,6 +24,14 @@ seen_minhash_sigs = []
 NUM_HASHES = 128       # signature length — more = more accurate, slower
 MINHASH_THRESHOLD = 0.9  # estimated Jaccard > 90% = near-duplicate
 _BIG_PRIME = (1 << 61) - 1
+
+'''analytic stuff'''
+STOP_WORDS = set(get_stop_words('en'))
+
+unique_pages = set()    # unique URLs seen (fragment-stripped)
+longest_page = ("", 0)  # (url, word_count)
+word_freq = Counter()   # word frequencies across all crawled pages
+subdomains = {}         # netloc -> set of unique page URLs
 
 
 
@@ -36,6 +51,23 @@ x NEAR DUPLICATES!!!
   stop_words?
   local storage instead?!
   implement multithreading?
+
+  calculate the most common words
+  find longest page
+  find total numsubdomains 
+       Submit the list of subdomains ordered alphabetically and the number of unique pages detected in each subdomain. The content of this list should be lines containing subdomain, number, for example:
+       vision.ics.uci.edu, 100
+  how many unique pages
+'''
+
+'''
+someone said :
+how many pages did you have
+mine just stopped at 5.5k 0_0
+5.2k 
+
+someone said :
+70 subdomains is too little...
 '''
 
 def scraper(url, resp):
@@ -58,6 +90,12 @@ def extract_next_links(url, resp):
     if not is_valid(url) or resp.status != 200 or not resp.raw_response:
         return []
 
+    # Track unique pages and subdomains by URL (per assignment definition),
+    # before any content filtering
+    page_url = urlunparse(urlparse(url)._replace(fragment=""))
+    unique_pages.add(page_url)
+    subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+
     content_hash = hashlib.md5(resp.raw_response.content).hexdigest()
     if content_hash in seen_hashes:
         return []
@@ -71,11 +109,14 @@ def extract_next_links(url, resp):
     
 
     words = soup.get_text(separator=" ").split()
-    tag_count = len(soup.find_all())
-    useful_ratio = len(words) / tag_count if tag_count > 0 else 0
+
+    # this is for finding the ratio of annoying empty page with lots of tags. 
+    # lowkey it removed too many pages
+    # tag_count = len(soup.find_all())
+    # useful_ratio = len(words) / tag_count if tag_count > 0 else 0 
 
     # Low-content checks
-    if len(words) < NUM_WORDS or useful_ratio < USEFUL_RATIO:
+    if len(words) < NUM_WORDS : # or useful_ratio < USEFUL_RATIO:
         return []
 
     # Near-duplicate check
@@ -90,6 +131,16 @@ def extract_next_links(url, resp):
     if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
         return []
     seen_minhash_sigs.append(sig)
+
+    # Page passed all quality checks — update word stats
+    global longest_page
+
+    if len(words) > longest_page[1]:
+        longest_page = (page_url, len(words))
+    for w in words:
+        w = w.lower()
+        if w.isalpha() and w not in STOP_WORDS:
+            word_freq[w] += 1
 
     links = []
     for tag in soup.find_all("a", href=True):
@@ -125,8 +176,8 @@ def is_valid(url):
         if len(segments) != len(set(segments)):
             return False
 
-        # calender traps
-        if re.search(r"\d{4}[-/]\d{1,2}([-/]\d{1,2})?", parsed.path):
+        # calendar traps: /2024/01/ or /2024/01/15/ but not /cs121/2024/
+        if re.search(r"/\d{4}/\d{1,2}(/|$)", parsed.path):
             return False
         
         # too long of a url - basic trap
@@ -186,3 +237,24 @@ def minhash_signature(words):
 
 def minhash_similarity(sig1, sig2):
     return sum(a == b for a, b in zip(sig1, sig2)) / NUM_HASHES
+
+# For report
+def generate_report(path="report.txt"):
+    global longest_page
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"1. Unique pages found: {len(unique_pages)}\n\n")
+
+        f.write(f"2. Longest page: {longest_page[0]}\n")
+        f.write(f"   Word count: {longest_page[1]}\n\n")
+
+        f.write("3. Top 50 most common words:\n")
+        for rank, (word, count) in enumerate(word_freq.most_common(50), 1):
+            f.write(f"   {rank:2}. {word} ({count})\n")
+        f.write("\n")
+
+        f.write("4. Subdomains (alphabetical):\n")
+        for netloc in sorted(subdomains):
+            f.write(f"   {netloc}, {len(subdomains[netloc])}\n")
+    print(f"[report] Written to {path}")
+
+atexit.register(generate_report)
