@@ -7,6 +7,9 @@ NUM_WORDS = 100
 USEFUL_RATIO = 0.8  # minimum words-per-tag; below this = markup-heavy, low info
 
 seen_hashes = set()
+seen_simhashes = []
+SIMHASH_THRESHOLD = 3  # pages differing by <= 3 bits are near-duplicates
+
 
 
 '''
@@ -19,6 +22,12 @@ x   - no duplicate pages (e.g. by content hash)
 !   - no near-duplicate pages (e.g. by content similarity)
 x Detect and avoid dead URLs that return a 200 status but no data 
 x Detect and avoid crawling very large files, especially if they have low information value
+
+TODO:
+NEAR DUPLICATES!!!
+stop_words?
+local storage instead?!
+implement multithreading?
 '''
 
 def scraper(url, resp):
@@ -61,6 +70,13 @@ def extract_next_links(url, resp):
     if len(words) < NUM_WORDS or useful_ratio < USEFUL_RATIO:
         return []
 
+    # Near-duplicate check
+    # only runs for pages that pass everything else!
+    fingerprint = simhash(words)
+    if any(hamming_distance(fingerprint, h) <= SIMHASH_THRESHOLD for h in seen_simhashes):
+        return []
+    seen_simhashes.append(fingerprint)
+
     links = []
     for tag in soup.find_all("a", href=True):
         link = urljoin(url, tag["href"])
@@ -69,6 +85,31 @@ def extract_next_links(url, resp):
             links.append(link)
 
     return links
+
+
+def simhash(words):
+    '''
+    hashes each word
+    accumulates a weighted bit vector across all 64 bit positions
+    produces a single 64-bit integer fingerprint
+    '''
+    v = [0] * 64
+    for word in words:
+        h = int(hashlib.md5(word.encode()).hexdigest(), 16) & ((1 << 64) - 1)
+        for i in range(64):
+            v[i] += 1 if h & (1 << i) else -1
+    fingerprint = 0
+    for i in range(64):
+        if v[i] > 0:
+            fingerprint |= (1 << i)
+    return fingerprint
+
+def hamming_distance(h1, h2):
+    ''' 
+    counts how many bits differ between two fingerprints
+    pages with very similar text will differ by only a few bits
+    '''
+    return bin(h1 ^ h2).count('1')
 
 def is_valid(url):
     ''' Filter by URL pattern (domain, file extension, scheme) '''
