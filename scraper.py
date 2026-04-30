@@ -1,10 +1,12 @@
 import re
-from urllib.parse import urlparse
+import hashlib
+from urllib.parse import urlparse, urljoin, urlunparse
 from bs4 import BeautifulSoup
 
 NUM_WORDS = 100
 USEFUL_RATIO = 0.8  # minimum words-per-tag; below this = markup-heavy, low info
 
+seen_hashes = set()
 
 
 '''
@@ -13,6 +15,8 @@ requirements to hit:
   Crawl all pages with high textual information content
 ? Detect and avoid infinite traps
   Detect and avoid sets of similar pages with no information
+x   - no duplicate pages (e.g. by content hash)
+!   - no near-duplicate pages (e.g. by content similarity)
 x Detect and avoid dead URLs that return a 200 status but no data 
 x Detect and avoid crawling very large files, especially if they have low information value
 '''
@@ -34,13 +38,13 @@ def extract_next_links(url, resp):
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
 
-    if (not is_valid(url) or resp.status != 200):
-        return list()
-    
-    links = []
-    for link in re.findall(r'<a\s+(?:[^>]*?\s+)?href="([^"]*)"', resp.raw_response.content.decode()):
-        if is_valid(link):
-            links.append(link)
+    if not is_valid(url) or resp.status != 200 or not resp.raw_response:
+        return []
+
+    content_hash = hashlib.md5(resp.raw_response.content).hexdigest()
+    if content_hash in seen_hashes:
+        return []
+    seen_hashes.add(content_hash)
 
     ''' Crawl all pages with high textual information content '''
     soup = BeautifulSoup(resp.raw_response.content, "html.parser")
@@ -49,20 +53,18 @@ def extract_next_links(url, resp):
         tag.decompose()
     
 
-    text = soup.get_text(separator=" ") # just the text form now
-    words = text.split()                # split into words
+    words = soup.get_text(separator=" ").split()
     tag_count = len(soup.find_all())
     useful_ratio = len(words) / tag_count if tag_count > 0 else 0
 
     # Low-content checks
-    if len(words) < NUM_WORDS or useful_ratio < USEFUL_RATIO: # too few words, likely not a useful page
-        ''' also helps clear "return a 200 status but no data" '''
-        print("USELESS!")
+    if len(words) < NUM_WORDS or useful_ratio < USEFUL_RATIO:
         return []
 
     links = []
     for tag in soup.find_all("a", href=True):
-        link = tag["href"]
+        link = urljoin(url, tag["href"])
+        link = urlunparse(urlparse(link)._replace(fragment=""))
         if is_valid(link):
             links.append(link)
 
@@ -85,7 +87,12 @@ def is_valid(url):
         # path depth is too deep
         if parsed.path.count("/") > 10:
             return False
-        
+
+        # repeating path segments trap
+        segments = [s for s in parsed.path.split("/") if s]
+        if len(segments) != len(set(segments)):
+            return False
+
         # calender traps
         if re.search(r"\d{4}[-/]\d{1,2}([-/]\d{1,2})?", parsed.path):
             return False
