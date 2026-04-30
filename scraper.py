@@ -13,8 +13,10 @@ SIMHASH_THRESHOLD = 3  # pages differing by <= 3 bits are near-duplicates
 # what if we wanted to do...
 # document D1 is a near-duplicate of document D2 if more than
 # 90% of the words in the documents are the same
-seen_word_sets = []
-JACCARD_THRESHOLD = 0.9  # pages sharing > 90% of words are near-duplicates
+seen_minhash_sigs = []
+NUM_HASHES = 128       # signature length — more = more accurate, slower
+MINHASH_THRESHOLD = 0.9  # estimated Jaccard > 90% = near-duplicate
+_BIG_PRIME = (1 << 61) - 1
 
 
 
@@ -84,10 +86,10 @@ def extract_next_links(url, resp):
     seen_simhashes.append(fingerprint)
 
 
-    word_set = set(words)
-    if any(jaccard_similarity(word_set, s) > JACCARD_THRESHOLD for s in seen_word_sets):
+    sig = minhash_signature(words)
+    if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
         return []
-    seen_word_sets.append(word_set)
+    seen_minhash_sigs.append(sig)
 
     links = []
     for tag in soup.find_all("a", href=True):
@@ -171,7 +173,16 @@ def hamming_distance(h1, h2):
     '''
     return bin(h1 ^ h2).count('1')
 
-def jaccard_similarity(set1, set2):
-    intersection = len(set1 & set2)
-    union = len(set1 | set2)
-    return intersection / union if union > 0 else 0
+# MIN HASH HELPERS!!!!
+def get_shingles(words, n=2):
+    return [" ".join(words[i:i+n]) for i in range(len(words) - n + 1)]
+
+def minhash_signature(words):
+    shingles = get_shingles(words)
+    if not shingles:
+        return [0] * NUM_HASHES
+    hashed = [int(hashlib.md5(s.encode()).hexdigest(), 16) for s in shingles]
+    return [min((a * x + a) % _BIG_PRIME for x in hashed) for a in range(1, NUM_HASHES + 1)]
+
+def minhash_similarity(sig1, sig2):
+    return sum(a == b for a, b in zip(sig1, sig2)) / NUM_HASHES
