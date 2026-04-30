@@ -10,24 +10,30 @@ seen_hashes = set()
 seen_simhashes = []
 SIMHASH_THRESHOLD = 3  # pages differing by <= 3 bits are near-duplicates
 
+# what if we wanted to do...
+# document D1 is a near-duplicate of document D2 if more than
+# 90% of the words in the documents are the same
+seen_word_sets = []
+JACCARD_THRESHOLD = 0.9  # pages sharing > 90% of words are near-duplicates
+
 
 
 '''
 requirements to hit:
-? Honor the politeness delay for each site
+x Honor the politeness delay for each site
   Crawl all pages with high textual information content
 ? Detect and avoid infinite traps
-  Detect and avoid sets of similar pages with no information
+? Detect and avoid sets of similar pages with no information
 x   - no duplicate pages (e.g. by content hash)
-!   - no near-duplicate pages (e.g. by content similarity)
+x   - no near-duplicate pages (e.g. by content similarity)
 x Detect and avoid dead URLs that return a 200 status but no data 
 x Detect and avoid crawling very large files, especially if they have low information value
 
 TODO:
-NEAR DUPLICATES!!!
-stop_words?
-local storage instead?!
-implement multithreading?
+x NEAR DUPLICATES!!!
+  stop_words?
+  local storage instead?!
+  implement multithreading?
 '''
 
 def scraper(url, resp):
@@ -77,6 +83,12 @@ def extract_next_links(url, resp):
         return []
     seen_simhashes.append(fingerprint)
 
+
+    word_set = set(words)
+    if any(jaccard_similarity(word_set, s) > JACCARD_THRESHOLD for s in seen_word_sets):
+        return []
+    seen_word_sets.append(word_set)
+
     links = []
     for tag in soup.find_all("a", href=True):
         link = urljoin(url, tag["href"])
@@ -87,29 +99,6 @@ def extract_next_links(url, resp):
     return links
 
 
-def simhash(words):
-    '''
-    hashes each word
-    accumulates a weighted bit vector across all 64 bit positions
-    produces a single 64-bit integer fingerprint
-    '''
-    v = [0] * 64
-    for word in words:
-        h = int(hashlib.md5(word.encode()).hexdigest(), 16) & ((1 << 64) - 1)
-        for i in range(64):
-            v[i] += 1 if h & (1 << i) else -1
-    fingerprint = 0
-    for i in range(64):
-        if v[i] > 0:
-            fingerprint |= (1 << i)
-    return fingerprint
-
-def hamming_distance(h1, h2):
-    ''' 
-    counts how many bits differ between two fingerprints
-    pages with very similar text will differ by only a few bits
-    '''
-    return bin(h1 ^ h2).count('1')
 
 def is_valid(url):
     ''' Filter by URL pattern (domain, file extension, scheme) '''
@@ -155,3 +144,34 @@ def is_valid(url):
     except TypeError:
         print ("TypeError for ", parsed)
         raise
+
+
+
+def simhash(words):
+    '''
+    hashes each word
+    accumulates a weighted bit vector across all 64 bit positions
+    produces a single 64-bit integer fingerprint
+    '''
+    v = [0] * 64
+    for word in words:
+        h = int(hashlib.md5(word.encode()).hexdigest(), 16) & ((1 << 64) - 1)
+        for i in range(64):
+            v[i] += 1 if h & (1 << i) else -1
+    fingerprint = 0
+    for i in range(64):
+        if v[i] > 0:
+            fingerprint |= (1 << i)
+    return fingerprint
+
+def hamming_distance(h1, h2):
+    ''' 
+    counts how many bits differ between two fingerprints
+    pages with very similar text will differ by only a few bits
+    '''
+    return bin(h1 ^ h2).count('1')
+
+def jaccard_similarity(set1, set2):
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
+    return intersection / union if union > 0 else 0
