@@ -81,6 +81,9 @@ someone said :
 70 subdomains is too little...
 '''
 
+def scraper(url, resp):
+    links = extract_next_links(url, resp)
+    return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
     ''' Filter by content quality, parse and return links '''
@@ -136,23 +139,23 @@ def extract_next_links(url, resp):
         _flog(f"LOW_WORDS| {page_url} | words={len(words)} (min={NUM_WORDS})")
         return []
 
-    # # Near-duplicate check — SimHash
-    # fingerprint = simhash(words)
-    # for prev_url, h in seen_simhashes:
-    #     dist = hamming_distance(fingerprint, h)
-    #     if dist <= SIMHASH_THRESHOLD:
-    #         _flog(f"SIMHASH  | {page_url} | dist={dist} bits (≤{SIMHASH_THRESHOLD}) | matched: {prev_url}")
-    #         return []
-    # seen_simhashes.append((page_url, fingerprint))
+    # Near-duplicate check — SimHash
+    fingerprint = simhash(words)
+    for prev_url, h in seen_simhashes:
+        dist = hamming_distance(fingerprint, h)
+        if dist <= SIMHASH_THRESHOLD:
+            _flog(f"SIMHASH  | {page_url} | dist={dist} bits (≤{SIMHASH_THRESHOLD}) | matched: {prev_url}")
+            # return [] # TODO : FIX?
+    seen_simhashes.append((page_url, fingerprint))
 
-    # # Near-duplicate check — MinHash
-    # sig = minhash_signature(words)
-    # for prev_url, s in seen_minhash_sigs:
-    #     sim = minhash_similarity(sig, s)
-    #     if sim > MINHASH_THRESHOLD:
-    #         _flog(f"MINHASH  | {page_url} | sim={sim:.1%} (>{MINHASH_THRESHOLD:.0%}) | matched: {prev_url}")
-    #         return []
-    # seen_minhash_sigs.append((page_url, sig))
+    # Near-duplicate check — MinHash
+    sig = minhash_signature(words)
+    for prev_url, s in seen_minhash_sigs:
+        sim = minhash_similarity(sig, s)
+        if sim > MINHASH_THRESHOLD:
+            _flog(f"MINHASH  | {page_url} | sim={sim:.1%} (>{MINHASH_THRESHOLD:.0%}) | matched: {prev_url}")
+            # return [] # TODO : FIX?
+    seen_minhash_sigs.append((page_url, sig))
 
     # Page passed all quality checks — update word stats
     global longest_page
