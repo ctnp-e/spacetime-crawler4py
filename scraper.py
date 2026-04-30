@@ -34,7 +34,15 @@ longest_page = ("", 0)  # (url, word_count)
 word_freq = Counter()   # word frequencies across all crawled pages
 subdomains = {}         # netloc -> set of unique page URLs
 
-open("crawl_log.txt", "w").close()  # clear log on each run
+DEBUG = True
+
+open("crawl_log.txt", "w").close()   # clear log on each run
+open("filter_log.txt", "w").close()  # clear filter log on each run
+
+def _flog(msg):
+    if DEBUG:
+        with open("filter_log.txt", "a", encoding="utf-8") as f:
+            f.write(f"{strftime('%H:%M:%S')}  {msg}\n")
 
 
 
@@ -87,7 +95,13 @@ def extract_next_links(url, resp):
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
 
-    if not is_valid(url) or resp.status != 200 or not resp.raw_response:
+    if not is_valid(url):
+        return []
+    if resp.status != 200:
+        _flog(f"STATUS   | {url} | status={resp.status}")
+        return []
+    if not resp.raw_response:
+        _flog(f"NO_RESP  | {url}")
         return []
 
     # Track unique pages and subdomains by URL (per assignment definition),
@@ -98,6 +112,7 @@ def extract_next_links(url, resp):
 
     content_hash = hashlib.md5(resp.raw_response.content).hexdigest()
     if content_hash in seen_hashes:
+        _flog(f"HASH_DUP | {page_url}")
         return []
     seen_hashes.add(content_hash)
 
@@ -116,23 +131,28 @@ def extract_next_links(url, resp):
     # tag_count = len(soup.find_all())
     # useful_ratio = len(words) / tag_count if tag_count > 0 else 0 
 
-    # TODO : TOO HARSH?
-    # Low-content checks
-    if len(words) < NUM_WORDS : # or useful_ratio < USEFUL_RATIO:
+    # Low-content check
+    if len(words) < NUM_WORDS:
+        _flog(f"LOW_WORDS| {page_url} | words={len(words)} (min={NUM_WORDS})")
         return []
 
-    # Near-duplicate check
-    # only runs for pages that pass everything else!
-    fingerprint = simhash(words)
-    if any(hamming_distance(fingerprint, h) <= SIMHASH_THRESHOLD for h in seen_simhashes):
-        return []
-    seen_simhashes.append(fingerprint)
+    # # Near-duplicate check — SimHash
+    # fingerprint = simhash(words)
+    # for prev_url, h in seen_simhashes:
+    #     dist = hamming_distance(fingerprint, h)
+    #     if dist <= SIMHASH_THRESHOLD:
+    #         _flog(f"SIMHASH  | {page_url} | dist={dist} bits (≤{SIMHASH_THRESHOLD}) | matched: {prev_url}")
+    #         return []
+    # seen_simhashes.append((page_url, fingerprint))
 
-    # TODO : TOO HARSH?
+    # # Near-duplicate check — MinHash
     # sig = minhash_signature(words)
-    # if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
-    #     return []
-    # seen_minhash_sigs.append(sig)
+    # for prev_url, s in seen_minhash_sigs:
+    #     sim = minhash_similarity(sig, s)
+    #     if sim > MINHASH_THRESHOLD:
+    #         _flog(f"MINHASH  | {page_url} | sim={sim:.1%} (>{MINHASH_THRESHOLD:.0%}) | matched: {prev_url}")
+    #         return []
+    # seen_minhash_sigs.append((page_url, sig))
 
     # Page passed all quality checks — update word stats
     global longest_page
