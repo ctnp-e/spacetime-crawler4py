@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 # for report
 from stop_words import get_stop_words
 
-NUM_WORDS = 100
+NUM_WORDS = 20
 USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
 
 ''' For duplicate/near-duplicate detection, we use a combination of:'''
@@ -48,16 +48,16 @@ x Detect and avoid crawling very large files, especially if they have low inform
 
 TODO:
 x NEAR DUPLICATES!!!
-  stop_words?
+x stop_words?
   local storage instead?!
   implement multithreading?
 
-  calculate the most common words
+x calculate the most common words
   find longest page
   find total numsubdomains 
        Submit the list of subdomains ordered alphabetically and the number of unique pages detected in each subdomain. The content of this list should be lines containing subdomain, number, for example:
        vision.ics.uci.edu, 100
-  how many unique pages
+x how many unique pages
 '''
 
 '''
@@ -126,11 +126,11 @@ def extract_next_links(url, resp):
         return []
     seen_simhashes.append(fingerprint)
 
-
-    sig = minhash_signature(words)
-    if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
-        return []
-    seen_minhash_sigs.append(sig)
+    
+    # sig = minhash_signature(words)
+    # if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
+    #     return []
+    # seen_minhash_sigs.append(sig)
 
     # Page passed all quality checks — update word stats
     global longest_page
@@ -139,7 +139,7 @@ def extract_next_links(url, resp):
         longest_page = (page_url, len(words))
     for w in words:
         w = w.lower()
-        if w.isalpha() and w not in STOP_WORDS:
+        if w.isalpha() and w not in STOP_WORDS: # for report
             word_freq[w] += 1
 
     links = []
@@ -179,6 +179,18 @@ def is_valid(url):
         # calendar traps: /2024/01/ or /2024/01/15/ but not /cs121/2024/
         if re.search(r"/\d{4}/\d{1,2}(/|$)", parsed.path):
             return False
+        # specficially!
+
+        # What the new pattern correctly allows:
+        # /cs121/2024/          - no digit segment after 2024/
+        # /research/2024-goals/ - dash not slash between year and next part
+        # /projects/h264/       - h264 is not 4 digits alone
+        # /page/20241/          5 digits, not matched
+
+        # What it correctly blocks:
+        # /events/2024/01/      - /2024/01/ matches
+        # /news/2023/12/25/     - /2023/12/ matches (catches the prefix)
+        # /archive/2019/3/      - /2019/3/ matches
         
         # too long of a url - basic trap
         if len(url) > 200:
