@@ -36,15 +36,27 @@ subdomains = {}         # netloc -> set of unique page URLs
 
 DEBUG = True
 
-open("crawl_log.txt", "w").close()   # clear log on each run
-open("filter_log.txt", "w").close()  # clear filter log on each run
+# open("crawl_log.txt", "w").close()   # clear log on each run
+# open("filter_log.txt", "w").close()  # clear filter log on each run
 
 # no longer used LOL
-def _flog(msg):
-    if DEBUG:
-        with open("filter_log.txt", "a", encoding="utf-8") as f:
-            f.write(f"{strftime('%H:%M:%S')}  {msg}\n")
+# def _flog(msg):
+#     if DEBUG:
+#         with open("filter_log.txt", "a", encoding="utf-8") as f:
+#             f.write(f"{strftime('%H:%M:%S')}  {msg}\n")
 
+open("crawl_log.txt", "w").close()  # clear log on each run
+
+_log_buffer = []
+
+def _flush_crawl_log():
+    if not _log_buffer:
+        return
+    with open("crawl_log.txt", "a", encoding="utf-8") as f:
+        f.writelines(_log_buffer)
+    _log_buffer.clear()
+
+atexit.register(_flush_crawl_log)
 
 
 '''
@@ -161,8 +173,10 @@ def extract_next_links(url, resp):
         if is_valid(link):
             links.append(link)
 
-    with open("crawl_log.txt", "a", encoding="utf-8") as f:
-        f.write(f"{strftime('%Y-%m-%d %H:%M:%S')}\t\t{url} -> {len(all_hrefs)} hrefs found, {len(links)} valid\n")
+    # for me personally...
+    _log_buffer.append(f"{strftime('%Y-%m-%d %H:%M:%S')}\t{url} -> {len(all_hrefs)} hrefs found, {len(links)} valid\n")
+    if len(_log_buffer) >= 100:
+        _flush_crawl_log()
 
     return links
 
