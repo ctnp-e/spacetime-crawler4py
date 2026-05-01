@@ -108,3 +108,6 @@ venv.bak/
 
 *.full.py
 *.shelve
+test_scraper.py
+test_similarity.py
+report.txt
