@@ -119,6 +119,7 @@ def extract_next_links(url, resp):
     unique_pages.add(page_url)
     subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
+    # hashing out input content for exact duplicate detection
     content_hash = hashlib.md5(resp.raw_response.content).hexdigest()
     if content_hash in seen_hashes:
         return []
@@ -158,13 +159,6 @@ def extract_next_links(url, resp):
     if any(hamming_distance(fingerprint, h) <= SIMHASH_THRESHOLD for h in seen_simhashes):
         return []
     seen_simhashes.append(fingerprint)
-
-    # # TODO : TOO HARSH?
-    # # it is NOT as efficinet btw as simhash, but minhash is more interpretable and has a nice Jaccard similarity estimation...
-    # sig = minhash_signature(words)
-    # if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
-    #     return []
-    # seen_minhash_sigs.append(sig)
 
     # Page passed all quality checks — update word stats
     global longest_page
@@ -251,15 +245,29 @@ def simhash(words):
     accumulates a weighted bit vector across all 64 bit positions
     produces a single 64-bit integer fingerprint
     '''
-    v = [0] * 64
+    v = [0] * 64 # list of 0's
     for word in words:
+
+        # word.encode -> string into bytes
+        # hashlib.md5 -> 128 bit hash object
+        # hexdigest -> takes the 128 bit hash object, turns it into hex
+        # int(..., 16) -> converts the hex string into an integer
+        # & ((1 << 64) - 1) -> bitmasks last 64 bits
+        # h = 64 bit pseudo random number
+
         h = int(hashlib.md5(word.encode()).hexdigest(), 16) & ((1 << 64) - 1)
         for i in range(64):
+            # if ith bit of h is on, add 1 to v[i], else subtract 1 from v[i]
             v[i] += 1 if h & (1 << i) else -1
+    
+    # all bits turned off
     fingerprint = 0
     for i in range(64):
         if v[i] > 0:
-            fingerprint |= (1 << i)
+            # bitwise or 
+            # (1 << i) is a number with only the ith bit on
+            # basically turns on only that bit for the fingerprint
+            fingerprint |= (1 << i) 
     return fingerprint
 
 def hamming_distance(h1, h2):
@@ -267,21 +275,12 @@ def hamming_distance(h1, h2):
     counts how many bits differ between two fingerprints
     pages with very similar text will differ by only a few bits
     '''
+    # h1 ^ h2 -> bitwise XOR, gives a number with bits on where h1 and h2 differ
+    # bin(...) -> converts that number to a binary string, e.g. '0b101010'
+    # .count('1') -> counts how many '1's are in that binary string
+    # however many 1's show how different they actually are
     return bin(h1 ^ h2).count('1')
 
-# MIN HASH HELPERS!!!!
-def get_shingles(words, n=2):
-    return [" ".join(words[i:i+n]) for i in range(len(words) - n + 1)]
-
-def minhash_signature(words):
-    shingles = get_shingles(words)
-    if not shingles:
-        return [0] * NUM_HASHES
-    hashed = [int(hashlib.md5(s.encode()).hexdigest(), 16) for s in shingles]
-    return [min((a * x + a) % _BIG_PRIME for x in hashed) for a in range(1, NUM_HASHES + 1)]
-
-def minhash_similarity(sig1, sig2):
-    return sum(a == b for a, b in zip(sig1, sig2)) / NUM_HASHES
 
 # For report
 def generate_report(path="report.txt"):
@@ -303,17 +302,3 @@ def generate_report(path="report.txt"):
     print(f"[report] Written to {path}")
 
 atexit.register(generate_report)
-
-
-
-'''
-# IF YOU WANTED TO DO MINHASH INSTEAD. HERE YOU GO.
-
-# what if we wanted to do...
-# document D1 is a near-duplicate of document D2 if more than
-# 90% of the words in the documents are the same
-seen_minhash_sigs = []
-NUM_HASHES = 128       # signature length — more = more accurate, slower
-MINHASH_THRESHOLD = 0.9  
-_BIG_PRIME = (1 << 61) - 1
-'''
