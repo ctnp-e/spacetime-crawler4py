@@ -16,14 +16,14 @@ USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
 seen_hashes = set()
 seen_simhashes = []
 # possibly too harsh.
-SIMHASH_THRESHOLD = 6  # pages differing by <= 6 bits are near-duplicates
+SIMHASH_THRESHOLD = 3  # pages differing by <= 6 bits are near-duplicates
 
 # what if we wanted to do...
 # document D1 is a near-duplicate of document D2 if more than
 # 90% of the words in the documents are the same
 seen_minhash_sigs = []
 NUM_HASHES = 128       # signature length — more = more accurate, slower
-MINHASH_THRESHOLD = 0.9  # estimated Jaccard > 90% = near-duplicate
+MINHASH_THRESHOLD = 0.9  
 _BIG_PRIME = (1 << 61) - 1
 
 '''analytic stuff'''
@@ -152,11 +152,11 @@ def extract_next_links(url, resp):
         return []
     seen_simhashes.append(fingerprint)
 
-    # TODO : TOO HARSH?
-    sig = minhash_signature(words)
-    if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
-        return []
-    seen_minhash_sigs.append(sig)
+    # # TODO : TOO HARSH?
+    # sig = minhash_signature(words)
+    # if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
+    #     return []
+    # seen_minhash_sigs.append(sig)
 
     # Page passed all quality checks — update word stats
     global longest_page
