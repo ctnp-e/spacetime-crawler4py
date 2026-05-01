@@ -47,7 +47,7 @@ atexit.register(_flush_crawl_log)
 '''
 requirements to hit:
 x Honor the politeness delay for each site
-  Crawl all pages with high textual information content
+x Crawl all pages with high textual information content
 ? Detect and avoid infinite traps
 ? Detect and avoid sets of similar pages with no information
 x   - no duplicate pages (e.g. by content hash)
@@ -81,7 +81,6 @@ someone said :
 
 '''
 TODO : EXTRA CREDIT 
-(+2 points) Implement exact and near webpage similarity detection using the methods discussed in the lecture. Your implementation must be made from scratch, no libraries are allowed.
 
 (+5 points) Make the crawler multithreaded. 
 However, your multithreaded crawler MUST obey the politeness rule: two or more requests to the same domain, possibly from separate threads, must have a delay of 500ms (this is more tricky than it seems!). 
@@ -172,9 +171,10 @@ def extract_next_links(url, resp):
 
 
     # for me personally...
-    _log_buffer.append(f"{strftime('%Y-%m-%d %H:%M:%S')}\t{url} -> {len(all_hrefs)} hrefs found, {len(links)} valid\n")
-    if len(_log_buffer) >= 100:
-        _flush_crawl_log()
+    if (DEBUG):
+        _log_buffer.append(f"{strftime('%Y-%m-%d %H:%M:%S')}\t{url} -> {len(all_hrefs)} hrefs found, {len(links)} valid\n")
+        if len(_log_buffer) >= 100:
+            _flush_crawl_log()
 
     return links
 
