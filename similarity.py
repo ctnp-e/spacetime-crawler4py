@@ -1,12 +1,16 @@
 
 import hashlib
 import re
+from stop_words import get_stop_words
+
+_STOP_WORDS = set(get_stop_words('en'))
+
 
 class Similarity:
 
     def __init__(self, hash_bits=64):
         self.hash_bits = hash_bits
-        self.threshold = 0.9
+        self.threshold = 0.85
         self.url_exact_hashes = {}
         self.url_simhashes = {}
 
@@ -17,14 +21,18 @@ class Similarity:
     def extract_words(self, text):
         if not text:
             return {}
-        
+
         # Extract alphanumeric sequences (need + to match multi-char words)
         words = re.findall(r'\b[a-z0-9]+\b', text.lower())
-        
+
         word_freqs = {}
         for word in words:
+            # Drop stop words and very short tokens — they're shared by every
+            # page on the site and dominate the simhash with template noise.
+            if word in _STOP_WORDS or len(word) < 3:
+                continue
             word_freqs[word] = word_freqs.get(word, 0) + 1
-        
+
         return word_freqs
     
     def pseudo_random_hash(self, word):
@@ -102,8 +110,20 @@ class Similarity:
         words = []
         for word, freq in word_freqs.items():
             words.extend([word] * freq)
-            
+
         fingerprint = self.simhash(words)
+
+        '''
+        # shingle weighted if we need it
+        shingle_freqs = self.extract_shingles(text, n=3)
+        if not shingle_freqs:
+            return False
+        tokens = []
+        for shingle, freq in shingle_freqs.items():
+            tokens.extend([shingle] * freq)
+
+        fingerprint = self.simhash(tokens)
+        '''
 
         # Exact-match check against any previously seen page
         for stored_hash in self.url_exact_hashes.values():
@@ -119,3 +139,28 @@ class Similarity:
         self.url_exact_hashes[url] = exact_hash
         self.url_simhashes[url] = fingerprint
         return False
+
+    # IF ITS TOO HARSH AND I DONT WANNA LOWER THE AMT
+    def extract_shingles(self, text, n=3):
+        """
+        Generate n-word shingles from text. Each shingle is a single string
+        like "department computer science" — treated as one 'word' by simhash.
+
+        n=3 (trigrams) is the sweet spot: long enough to be distinctive,
+        short enough that small edits don't change too many shingles.
+        """
+        if not text:
+            return {}
+
+        tokens = re.findall(r'\b[a-z0-9]+\b', text.lower())
+
+        if len(tokens) < n:
+            # Page too short to form even one shingle
+            return {}
+
+        shingle_freqs = {}
+        for i in range(len(tokens) - n + 1):
+            shingle = " ".join(tokens[i:i + n])
+            shingle_freqs[shingle] = shingle_freqs.get(shingle, 0) + 1
+
+        return shingle_freqs

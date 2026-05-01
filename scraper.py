@@ -161,7 +161,9 @@ def take_text(url, resp, soup=None):
 
     
     # should call get_links BEFORE take_text
-    for tag in soup(["script", "style", "header", "footer", "nav"]):
+    for tag in soup(["script", "style", "header", "footer", 
+                     "nav", "aside","form", "noscript", 
+                     "button", "iframe"]):
         tag.decompose()
 
     full_text = soup.get_text(separator=" ")
