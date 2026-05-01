@@ -132,6 +132,15 @@ def extract_next_links(url, resp):
         tag.decompose()
     
 
+    all_hrefs = soup.find_all("a", href=True)
+    links = []
+    for tag in all_hrefs:
+        link = urljoin(url, tag["href"])
+        link = urlunparse(urlparse(link)._replace(fragment=""))
+        if is_valid(link):
+            links.append(link)
+
+
     words = soup.get_text(separator=" ").split()
 
     # TODO : TOO HARSH?
@@ -168,13 +177,6 @@ def extract_next_links(url, resp):
         if w.isalpha() and w not in STOP_WORDS: # for report
             word_freq[w] += 1
 
-    all_hrefs = soup.find_all("a", href=True)
-    links = []
-    for tag in all_hrefs:
-        link = urljoin(url, tag["href"])
-        link = urlunparse(urlparse(link)._replace(fragment=""))
-        if is_valid(link):
-            links.append(link)
 
     # for me personally...
     _log_buffer.append(f"{strftime('%Y-%m-%d %H:%M:%S')}\t{url} -> {len(all_hrefs)} hrefs found, {len(links)} valid\n")
