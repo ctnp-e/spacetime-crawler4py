@@ -2,7 +2,6 @@ import re
 import atexit
 import hashlib
 from collections import Counter
-from time import strftime
 from urllib.parse import urlparse, urljoin, urlunparse, parse_qs
 from bs4 import BeautifulSoup
 
@@ -13,7 +12,6 @@ NUM_WORDS = 20
 USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
 
 
-
 '''analytic stuff'''
 STOP_WORDS = set(get_stop_words('en'))
 
@@ -21,22 +19,6 @@ unique_pages = set()    # unique URLs seen (fragment-stripped)
 longest_page = ("", 0)  # (url, word_count)
 word_freq = Counter()   # word frequencies across all crawled pages
 subdomains = {}         # netloc -> set of unique page URLs
-
-DEBUG = True
-
-
-open("crawl_log.txt", "w").close()  # clear log on each run
-
-_log_buffer = []
-
-def _flush_crawl_log():
-    if not _log_buffer:
-        return
-    with open("crawl_log.txt", "a", encoding="utf-8") as f:
-        f.writelines(_log_buffer)
-    _log_buffer.clear()
-
-atexit.register(_flush_crawl_log)
 
 
 '''

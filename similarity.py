@@ -47,6 +47,10 @@ class Similarity:
         hash_int = int(h, 16)
         return hash_int & ((1 << self.hash_bits) - 1)
 
+    def print_sim_percentage(self, url1, url2):
+        sim_percentage = self.hamming_distance(self.url_simhashes[url1], self.url_simhashes[url2])
+        print(f"Similarity between {url1} and {url2}: {sim_percentage:.2%}")
+
     def simhash(self, words):
         '''
         hashes each word
