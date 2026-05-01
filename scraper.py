@@ -12,11 +12,6 @@ from stop_words import get_stop_words
 NUM_WORDS = 20
 USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
 
-''' For duplicate/near-duplicate detection, we use a combination of:'''
-seen_hashes = set()
-seen_simhashes = []
-# possibly too harsh.
-SIMHASH_THRESHOLD = 3  # pages differing by <= 6 bits are near-duplicates
 
 
 '''analytic stuff'''
@@ -108,79 +103,92 @@ def extract_next_links(url, resp):
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-
+    # Validation guards up front, so we only parse HTML once we know we want it.
     if not is_valid(url) or resp.status != 200 or not resp.raw_response:
         return []
 
-    # Skip non-HTML responses (PDFs, images, JSON, binary blobs etc).
-    # Some endpoints serve binary content with no extension hint in the URL,
-    # so the extension check in is_valid can't catch them.
     headers = getattr(resp.raw_response, "headers", {}) or {}
     content_type = headers.get("Content-Type", "") or headers.get("content-type", "")
     mime = content_type.split(";", 1)[0].strip().lower()
     if mime and not (mime.startswith("text/")
                      or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
         return []
- 
-    # Track unique pages and subdomains by URL (per assignment definition),
-    # before any content filtering
+
+    # Parse once — share the soup between link extraction and text extraction.
+    soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+
+    # don't want to lose links living inside tags
+    links = get_links(url, resp, soup=soup)
+
+    text = take_text(url, resp, soup=soup)
+
+    if not text:
+        return []
+
+    words = text.split()
+
+    # Low-content check — skip pages with very little real text.
+    if len(words) < NUM_WORDS:
+        return []
+
+    # it is now confirmed unqiue
+    global longest_page
     page_url = urlunparse(urlparse(url)._replace(fragment=""))
     unique_pages.add(page_url)
     subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
-    # hashing out input content for exact duplicate detection
-    content_hash = hashlib.md5(resp.raw_response.content).hexdigest()
-    if content_hash in seen_hashes:
-        return []
-    seen_hashes.add(content_hash)
+    if len(words) > longest_page[1]:
+        longest_page = (page_url, len(words))
 
-    ''' Crawl all pages with high textual information content '''
-    soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+    for w in words:
+        w = w.lower()
+        if w.isalpha() and w not in STOP_WORDS:
+            word_freq[w] += 1
 
-    for tag in soup(["script", "style", "header", "footer", "nav"]):
-        tag.decompose()
-    
+    return links
 
+def get_links(url, resp, soup=None):
+    ''' Extract and return all hyperlinks from the page content.
+        Pass an existing soup to avoid re-parsing. '''
+    if soup is None:
+        soup = BeautifulSoup(resp.raw_response.content, "html.parser")
     all_hrefs = soup.find_all("a", href=True)
     links = []
     for tag in all_hrefs:
         link = urljoin(url, tag["href"])
         link = urlunparse(urlparse(link)._replace(fragment=""))
-        if is_valid(link):
-            links.append(link)
-
-
-    words = soup.get_text(separator=" ").split()
-
-    # Low-content checks
-    if len(words) < NUM_WORDS : # or useful_ratio < USEFUL_RATIO:
-        return []
-
-    # Near-duplicate check
-    # only runs for pages that pass everything else!
-    fingerprint = simhash(words)
-    if any(hamming_distance(fingerprint, h) <= SIMHASH_THRESHOLD for h in seen_simhashes):
-        return []
-    seen_simhashes.append(fingerprint)
-
-    # Page passed all quality checks — update word stats
-    global longest_page
-
-    if len(words) > longest_page[1]:
-        longest_page = (page_url, len(words))
-    for w in words:
-        w = w.lower()
-        if w.isalpha() and w not in STOP_WORDS: # for report
-            word_freq[w] += 1
-
-
-    # for me personally...
-    if (DEBUG):
-        _log_buffer.append(f"{strftime('%Y-%m-%d %H:%M:%S')}\t{url} -> {len(all_hrefs)} hrefs found, {len(links)} valid\n")
-        if len(_log_buffer) >= 100:
-            _flush_crawl_log()
-
+        links.append(link)
     return links
+
+# Pure text extraction, callable from Worker for similarity
+# checking before scraping happens. Pass an existing soup to skip re-parsing
+# (extract_next_links does this).
+def take_text(url, resp, soup=None):
+    if soup is None:
+        # Standalone path (FOR WOKRER))
+        if not is_valid(url) or resp.status != 200 or not resp.raw_response:
+            return None
+
+        # Skip non-HTML responses (PDFs, images, JSON, binary blobs etc).
+        # Some endpoints serve binary content with no extension hint in the URL,
+        # so the extension check in is_valid can't catch them
+
+        headers = getattr(resp.raw_response, "headers", {}) or {}
+        content_type = headers.get("Content-Type", "") or headers.get("content-type", "")
+        mime = content_type.split(";", 1)[0].strip().lower()
+        if mime and not (mime.startswith("text/")
+                         or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
+            return None
+
+        soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+
+    
+    # should call get_links BEFORE take_text
+    for tag in soup(["script", "style", "header", "footer", "nav"]):
+        tag.decompose()
+
+    full_text = soup.get_text(separator=" ")
+    return full_text
 
 def is_valid(url):
     ''' Filter by URL pattern (domain, file extension, scheme) '''
@@ -190,7 +198,6 @@ def is_valid(url):
     try:
         parsed = urlparse(url)
 
-        
         if parsed.scheme not in set(["http", "https"]):
             return False
         if not re.match(
@@ -219,118 +226,74 @@ def is_valid(url):
         raise
 
 def is_trap(url):
+    parsed = urlparse(url)
+    path_lower = parsed.path.lower()
 
-        parsed = urlparse(url)
-        path_lower = parsed.path.lower()
+    # path depth is too deep
+    if parsed.path.count("/") > 10:
+        return True
 
-        # path depth is too deep
-        if parsed.path.count("/") > 10:
-            return False
+    # repeating path segments trap
+    segments = [s for s in parsed.path.split("/") if s]
+    if len(segments) != len(set(segments)):
+        return True
 
-        # repeating path segments trap
-        segments = [s for s in parsed.path.split("/") if s]
-        if len(segments) != len(set(segments)):
-            return False
+    # calendar traps: /2024/01/ or /2024/01/15/ but not /cs121/2024/
+    if re.search(r"/\d{4}/\d{1,2}(/|$)", path_lower):
+        return True
 
-        # calenders!!!
+    # ISO-date traps: /events/2024-01-15/, /posts/2024-01/, etc.
+    if re.search(r"/\d{4}-\d{1,2}(-\d{1,2})?(/|$)", path_lower):
+        return True
 
-        # calendar traps: /2024/01/ or /2024/01/15/ but not /cs121/2024/
-        if re.search(r"/\d{4}/\d{1,2}(/|$)", path_lower):
-            return False
-        
-        # ISO-date traps: /events/2024-01-15/, /posts/2024-01/, etc.
-        if re.search(r"/\d{4}-\d{1,2}(-\d{1,2})?(/|$)", path_lower):
-            return False
-    
-        # calendar archive views
-        if re.search(r"/events/(month|list|today)(/|$)", path_lower):
-            return False
-        if re.search(r"/events/[^/]+/day/\d{4}-\d{2}-\d{2}", path_lower):
-            return False
+    # calendar archive views
+    if re.search(r"/events/(month|list|today)(/|$)", path_lower):
+        return True
+    if re.search(r"/events/[^/]+/day/\d{4}-\d{2}-\d{2}", path_lower):
+        return True
 
-        query = parse_qs(parsed.query)
+    query = parse_qs(parsed.query)
 
+    # doku is INFINITE CONTENT it is INSANE
+    if "/doku.php" in path_lower:
+        do_vals = {v.lower() for v in query.get("do", [])}
+        if do_vals & {"edit", "diff", "index", "recent",
+                      "backlink", "revisions", "media"}:
+            return True
+        if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
+            return True
 
-        # doku is INFINITE CONTENT it is INSANE
-        if "/doku.php" in path_lower:
-            do_vals = {v.lower() for v in query.get("do", [])}
-            if do_vals & {"edit", "diff", "index", "recent",
-                          "backlink", "revisions", "media"}:
-                return False
-            if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
-                return False
-            
-        # doku endpoints
-        if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
-            return False
+    # doku endpoints
+    if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
+        return True
 
-        # tracking / session params
-        # same page reached under many URLs
-        tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", 
-                    "sid", "sessionid", "phpsessid", "jsessionid", "fbclid", "gclid", 
-                    "ref"}
-        
-        if any(k.lower() in tracking for k in query):
-            return False
-        # repeated query keys (?page=1&page=2) usually means a pagination loop
+    # tracking / session params — same page reached under many URLs
+    tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+                "sid", "sessionid", "phpsessid", "jsessionid", "fbclid", "gclid",
+                "ref"}
+    if any(k.lower() in tracking for k in query):
+        return True
 
-        if any(len(v) > 1 for v in query.values()):
-            return False
-        
-        image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff")
-        for values in query.values():
-            for value in values:
-                if value.lower().endswith(image_types):
+    # repeated query keys (?page=1&page=2) usually means a pagination loop
+    if any(len(v) > 1 for v in query.values()):
+        return True
+
+    # goodbye all images
+    image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff")
+    for values in query.values():
+        for value in values:
+            if value.lower().endswith(image_types):
+                return True
+
+    # too many pages likely pagination trap, e.g. ?page=1, ?page=2, ... ?page=10000
+    for key, vals in query.items():
+        if key.lower() in {"page", "p", "start", "offset"}:
+            for v in vals:
+                if v.isdigit() and int(v) > 1000:
                     return True
-            
-        # excessive pagination — likely an infinite list
-        for key, vals in query.items():
-            if key.lower() in {"page", "p", "start", "offset"}:
-                for v in vals:
-                    if v.isdigit() and int(v) > 1000:
-                        return False
 
-def simhash(words):
-    '''
-    hashes each word
-    accumulates a weighted bit vector across all 64 bit positions
-    produces a single 64-bit integer fingerprint
-    '''
-    v = [0] * 64 # list of 0's
-    for word in words:
+    return False
 
-        # word.encode -> string into bytes
-        # hashlib.md5 -> 128 bit hash object
-        # hexdigest -> takes the 128 bit hash object, turns it into hex
-        # int(..., 16) -> converts the hex string into an integer
-        # & ((1 << 64) - 1) -> bitmasks last 64 bits
-        # h = 64 bit pseudo random number
-
-        h = int(hashlib.md5(word.encode()).hexdigest(), 16) & ((1 << 64) - 1)
-        for i in range(64):
-            # if ith bit of h is on, add 1 to v[i], else subtract 1 from v[i]
-            v[i] += 1 if h & (1 << i) else -1
-    
-    # all bits turned off
-    fingerprint = 0
-    for i in range(64):
-        if v[i] > 0:
-            # bitwise or 
-            # (1 << i) is a number with only the ith bit on
-            # basically turns on only that bit for the fingerprint
-            fingerprint |= (1 << i) 
-    return fingerprint
-
-def hamming_distance(h1, h2):
-    ''' 
-    counts how many bits differ between two fingerprints
-    pages with very similar text will differ by only a few bits
-    '''
-    # h1 ^ h2 -> bitwise XOR, gives a number with bits on where h1 and h2 differ
-    # bin(...) -> converts that number to a binary string, e.g. '0b101010'
-    # .count('1') -> counts how many '1's are in that binary string
-    # however many 1's show how different they actually are
-    return bin(h1 ^ h2).count('1')
 
 
 # For report

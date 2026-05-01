@@ -6,6 +6,8 @@ from utils import get_logger
 import scraper
 import time
 
+import similarity
+
 
 class Worker(Thread):
     def __init__(self, worker_id, config, frontier):
@@ -16,6 +18,8 @@ class Worker(Thread):
         assert {getsource(scraper).find(req) for req in {"from requests import", "import requests"}} == {-1}, "Do not use requests in scraper.py"
         assert {getsource(scraper).find(req) for req in {"from urllib.request import", "import urllib.request"}} == {-1}, "Do not use urllib.request in scraper.py"
         super().__init__(daemon=True)
+
+        self.sim = similarity.Similarity()
         
     def run(self):
         while True:
@@ -23,10 +27,27 @@ class Worker(Thread):
             if not tbd_url:
                 self.logger.info("Frontier is empty. Stopping Crawler.")
                 break
+
+            # have to download it anyways
             resp = download(tbd_url, self.config, self.logger)
+            
+            # take text, and then compare
+            # YOU WANT TO TAKE THE TEXT EVEN IF NEAR DUPLICATE.
+            text = scraper.take_text(tbd_url, resp)
+            duplicate = self.sim.is_similar(tbd_url, text)
+
+            if (duplicate):
+                self.logger.info(
+                    f"Skipped {tbd_url} due to similarity to previously seen page, "
+                    f"using cache {self.config.cache_server}.")
+                self.frontier.mark_url_complete(tbd_url)
+                continue
+
             self.logger.info(
                 f"Downloaded {tbd_url}, status <{resp.status}>, "
                 f"using cache {self.config.cache_server}.")
+            
+            # continues normally now we know its not a duplicate
             scraped_urls = scraper.scraper(tbd_url, resp)
             for scraped_url in scraped_urls:
                 self.frontier.add_url(scraped_url)
