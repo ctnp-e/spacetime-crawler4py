@@ -82,6 +82,7 @@ someone said :
 '''
 TODO : EXTRA CREDIT 
 
+i give up bro.
 (+5 points) Make the crawler multithreaded. 
 However, your multithreaded crawler MUST obey the politeness rule: two or more requests to the same domain, possibly from separate threads, must have a delay of 500ms (this is more tricky than it seems!). 
 In order to do this part of the extra credit, you should read the "Architecture" section of the README.md file. Basically, to make a multithreaded crawler you will need to:

@@ -1,5 +1,6 @@
 from utils import get_logger
-from crawler.frontier import Frontier
+from crawler.frontier_sqlite import Frontier
+# from crawler.frontier import Frontier
 from crawler.worker import Worker
 
 class Crawler(object):
