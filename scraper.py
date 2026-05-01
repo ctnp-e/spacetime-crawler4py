@@ -64,29 +64,6 @@ x calculate the most common words
 x how many unique pages
 '''
 
-'''
-someone said :
-how many pages did you have
-mine just stopped at 5.5k 0_0
-5.2k 
-
-someone said :
-70 subdomains is too little...
-'''
-
-'''
-TODO : EXTRA CREDIT 
-
-(+5 points) Make the crawler multithreaded. 
-However, your multithreaded crawler MUST obey the politeness rule: two or more requests to the same domain, possibly from separate threads, must have a delay of 500ms (this is more tricky than it seems!). 
-In order to do this part of the extra credit, you should read the "Architecture" section of the README.md file. Basically, to make a multithreaded crawler you will need to:
-    Reimplement the Frontier so that it's thread-safe and so that it makes politeness per domain easy to manage
-    Reimplement the Worker thread so that it's politeness-safe
-    Set the THREADCOUNT variable in Config.ini to no more than 4 threads
-
-If your multithreaded crawler is knocking down the server you may be penalized, so make sure you keep it polite (and note that it makes no sense to use a too large number of threads due to the politeness rule that you MUST obey).
-'''
-
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
