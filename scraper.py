@@ -18,13 +18,6 @@ seen_simhashes = []
 # possibly too harsh.
 SIMHASH_THRESHOLD = 3  # pages differing by <= 6 bits are near-duplicates
 
-# what if we wanted to do...
-# document D1 is a near-duplicate of document D2 if more than
-# 90% of the words in the documents are the same
-seen_minhash_sigs = []
-NUM_HASHES = 128       # signature length — more = more accurate, slower
-MINHASH_THRESHOLD = 0.9  
-_BIG_PRIME = (1 << 61) - 1
 
 '''analytic stuff'''
 STOP_WORDS = set(get_stop_words('en'))
@@ -36,14 +29,6 @@ subdomains = {}         # netloc -> set of unique page URLs
 
 DEBUG = True
 
-# open("crawl_log.txt", "w").close()   # clear log on each run
-# open("filter_log.txt", "w").close()  # clear filter log on each run
-
-# no longer used LOL
-# def _flog(msg):
-#     if DEBUG:
-#         with open("filter_log.txt", "a", encoding="utf-8") as f:
-#             f.write(f"{strftime('%H:%M:%S')}  {msg}\n")
 
 open("crawl_log.txt", "w").close()  # clear log on each run
 
@@ -92,6 +77,20 @@ mine just stopped at 5.5k 0_0
 
 someone said :
 70 subdomains is too little...
+'''
+
+'''
+TODO : EXTRA CREDIT 
+(+2 points) Implement exact and near webpage similarity detection using the methods discussed in the lecture. Your implementation must be made from scratch, no libraries are allowed.
+
+(+5 points) Make the crawler multithreaded. 
+However, your multithreaded crawler MUST obey the politeness rule: two or more requests to the same domain, possibly from separate threads, must have a delay of 500ms (this is more tricky than it seems!). 
+In order to do this part of the extra credit, you should read the "Architecture" section of the README.md file. Basically, to make a multithreaded crawler you will need to:
+    Reimplement the Frontier so that it's thread-safe and so that it makes politeness per domain easy to manage
+    Reimplement the Worker thread so that it's politeness-safe
+    Set the THREADCOUNT variable in Config.ini to no more than 4 threads
+
+If your multithreaded crawler is knocking down the server you may be penalized, so make sure you keep it polite (and note that it makes no sense to use a too large number of threads due to the politeness rule that you MUST obey).
 '''
 
 def scraper(url, resp):
@@ -149,7 +148,6 @@ def extract_next_links(url, resp):
     # tag_count = len(soup.find_all())
     # useful_ratio = len(words) / tag_count if tag_count > 0 else 0 
 
-    # TODO : TOO HARSH?
     # Low-content checks
     if len(words) < NUM_WORDS : # or useful_ratio < USEFUL_RATIO:
         return []
@@ -162,6 +160,7 @@ def extract_next_links(url, resp):
     seen_simhashes.append(fingerprint)
 
     # # TODO : TOO HARSH?
+    # # it is NOT as efficinet btw as simhash, but minhash is more interpretable and has a nice Jaccard similarity estimation...
     # sig = minhash_signature(words)
     # if any(minhash_similarity(sig, s) > MINHASH_THRESHOLD for s in seen_minhash_sigs):
     #     return []
@@ -304,3 +303,17 @@ def generate_report(path="report.txt"):
     print(f"[report] Written to {path}")
 
 atexit.register(generate_report)
+
+
+
+'''
+# IF YOU WANTED TO DO MINHASH INSTEAD. HERE YOU GO.
+
+# what if we wanted to do...
+# document D1 is a near-duplicate of document D2 if more than
+# 90% of the words in the documents are the same
+seen_minhash_sigs = []
+NUM_HASHES = 128       # signature length — more = more accurate, slower
+MINHASH_THRESHOLD = 0.9  
+_BIG_PRIME = (1 << 61) - 1
+'''
