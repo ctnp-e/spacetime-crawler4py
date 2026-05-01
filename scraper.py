@@ -3,7 +3,7 @@ import atexit
 import hashlib
 from collections import Counter
 from time import strftime
-from urllib.parse import urlparse, urljoin, urlunparse
+from urllib.parse import urlparse, urljoin, urlunparse, parse_qs
 from bs4 import BeautifulSoup
 
 # for report
@@ -112,6 +112,16 @@ def extract_next_links(url, resp):
     if not is_valid(url) or resp.status != 200 or not resp.raw_response:
         return []
 
+    # Skip non-HTML responses (PDFs, images, JSON, binary blobs etc).
+    # Some endpoints serve binary content with no extension hint in the URL,
+    # so the extension check in is_valid can't catch them.
+    headers = getattr(resp.raw_response, "headers", {}) or {}
+    content_type = headers.get("Content-Type", "") or headers.get("content-type", "")
+    mime = content_type.split(";", 1)[0].strip().lower()
+    if mime and not (mime.startswith("text/")
+                     or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
+        return []
+ 
     # Track unique pages and subdomains by URL (per assignment definition),
     # before any content filtering
     page_url = urlunparse(urlparse(url)._replace(fragment=""))
@@ -141,12 +151,6 @@ def extract_next_links(url, resp):
 
 
     words = soup.get_text(separator=" ").split()
-
-    # TODO : TOO HARSH?
-    # this is for finding the ratio of annoying empty page with lots of tags. 
-    # lowkey it removed too many pages
-    # tag_count = len(soup.find_all())
-    # useful_ratio = len(words) / tag_count if tag_count > 0 else 0 
 
     # Low-content checks
     if len(words) < NUM_WORDS : # or useful_ratio < USEFUL_RATIO:
@@ -178,8 +182,6 @@ def extract_next_links(url, resp):
 
     return links
 
-
-
 def is_valid(url):
     ''' Filter by URL pattern (domain, file extension, scheme) '''
     # Decide whether to crawl this url or not. 
@@ -187,6 +189,7 @@ def is_valid(url):
     # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
+
         
         if parsed.scheme not in set(["http", "https"]):
             return False
@@ -194,33 +197,11 @@ def is_valid(url):
             r"^(.+\.)?(ics|cs|informatics|stat)\.uci\.edu$", parsed.netloc.lower()):
             return False
         
-        # path depth is too deep
-        if parsed.path.count("/") > 10:
+        if (is_trap(url)):
             return False
 
-        # repeating path segments trap
-        segments = [s for s in parsed.path.split("/") if s]
-        if len(segments) != len(set(segments)):
-            return False
-
-        # calendar traps: /2024/01/ or /2024/01/15/ but not /cs121/2024/
-        if re.search(r"/\d{4}/\d{1,2}(/|$)", parsed.path):
-            return False
-        # specficially!
-
-        # What the new pattern correctly allows:
-        # /cs121/2024/          - no digit segment after 2024/
-        # /research/2024-goals/ - dash not slash between year and next part
-        # /projects/h264/       - h264 is not 4 digits alone
-        # /page/20241/          5 digits, not matched
-
-        # What it correctly blocks:
-        # /events/2024/01/      - /2024/01/ matches
-        # /news/2023/12/25/     - /2023/12/ matches (catches the prefix)
-        # /archive/2019/3/      - /2019/3/ matches
-        
         # too long of a url - basic trap
-        if len(url) > 200:
+        if len(url) > 1000:
             return False
         
         return not re.match(
@@ -237,7 +218,77 @@ def is_valid(url):
         print ("TypeError for ", parsed)
         raise
 
+def is_trap(url):
 
+        parsed = urlparse(url)
+        path_lower = parsed.path.lower()
+
+        # path depth is too deep
+        if parsed.path.count("/") > 10:
+            return False
+
+        # repeating path segments trap
+        segments = [s for s in parsed.path.split("/") if s]
+        if len(segments) != len(set(segments)):
+            return False
+
+        # calenders!!!
+
+        # calendar traps: /2024/01/ or /2024/01/15/ but not /cs121/2024/
+        if re.search(r"/\d{4}/\d{1,2}(/|$)", path_lower):
+            return False
+        
+        # ISO-date traps: /events/2024-01-15/, /posts/2024-01/, etc.
+        if re.search(r"/\d{4}-\d{1,2}(-\d{1,2})?(/|$)", path_lower):
+            return False
+    
+        # calendar archive views
+        if re.search(r"/events/(month|list|today)(/|$)", path_lower):
+            return False
+        if re.search(r"/events/[^/]+/day/\d{4}-\d{2}-\d{2}", path_lower):
+            return False
+
+        query = parse_qs(parsed.query)
+
+
+        # doku is INFINITE CONTENT it is INSANE
+        if "/doku.php" in path_lower:
+            do_vals = {v.lower() for v in query.get("do", [])}
+            if do_vals & {"edit", "diff", "index", "recent",
+                          "backlink", "revisions", "media"}:
+                return False
+            if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
+                return False
+            
+        # doku endpoints
+        if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
+            return False
+
+        # tracking / session params
+        # same page reached under many URLs
+        tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", 
+                    "sid", "sessionid", "phpsessid", "jsessionid", "fbclid", "gclid", 
+                    "ref"}
+        
+        if any(k.lower() in tracking for k in query):
+            return False
+        # repeated query keys (?page=1&page=2) usually means a pagination loop
+
+        if any(len(v) > 1 for v in query.values()):
+            return False
+        
+        image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff")
+        for values in query.values():
+            for value in values:
+                if value.lower().endswith(image_types):
+                    return True
+            
+        # excessive pagination — likely an infinite list
+        for key, vals in query.items():
+            if key.lower() in {"page", "p", "start", "offset"}:
+                for v in vals:
+                    if v.isdigit() and int(v) > 1000:
+                        return False
 
 def simhash(words):
     '''
