@@ -34,22 +34,25 @@ class Worker(Thread):
             # take text, and then compare
             # YOU WANT TO TAKE THE TEXT EVEN IF NEAR DUPLICATE.
             text = scraper.take_text(tbd_url, resp)
-            duplicate = self.sim.is_similar(tbd_url, text)
+            duplicate, similarity_type = self.sim.is_similar(tbd_url, text)
 
-            if (duplicate):
+            if (text and not duplicate):
                 self.logger.info(
-                    f"Skipped {tbd_url} due to similarity to previously seen page, "
+                    f"Downloaded {tbd_url}, status <{resp.status}>, "
                     f"using cache {self.config.cache_server}.")
-                self.frontier.mark_url_complete(tbd_url)
-                continue
-
-            self.logger.info(
-                f"Downloaded {tbd_url}, status <{resp.status}>, "
-                f"using cache {self.config.cache_server}.")
+                
+                # continues normally now we know its not a duplicate
+                scraped_urls = scraper.scraper(tbd_url, resp)
+                for scraped_url in scraped_urls:
+                    self.frontier.add_url(scraped_url)
+                    
+                time.sleep(self.config.time_delay)
+                
+            else:
+                self.logger.info(
+                    f"Skipped {tbd_url} due to {similarity_type} similarity.")
             
-            # continues normally now we know its not a duplicate
-            scraped_urls = scraper.scraper(tbd_url, resp)
-            for scraped_url in scraped_urls:
-                self.frontier.add_url(scraped_url)
+            
             self.frontier.mark_url_complete(tbd_url)
-            time.sleep(self.config.time_delay)
+
+            

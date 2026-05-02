@@ -15,6 +15,8 @@ class Similarity:
         self.url_simhashes = {}
 
     def specific_hash (self, word):
+        # DONT USE MD5
+        # use SHA256
         return hashlib.md5(word.encode()).hexdigest()
     
 
@@ -94,15 +96,19 @@ class Similarity:
         similarity_percentage = matching_bits / self.hash_bits
         return similarity_percentage
 
-    def is_similar(self, url, text):
+    def is_similar(self, url, text) : 
         '''
         Computes hashes from the page text and checks against previously
         stored hashes. Returns True if exact or near-duplicate found,
         False otherwise (and stores the hashes under `url` so future calls
         can compare against this page).
+
+        returns tuple (bool / type)
+        bool -> if its a duplicate or not
+        type -> "exact" or "near" if its a duplicate, None otherwise
         '''
         if not text:
-            return False
+            return False, "new"
 
         # Exact-match hash on full page text
         exact_hash = self.specific_hash(text)
@@ -110,7 +116,7 @@ class Similarity:
         # Build a frequency-weighted word list, then simhash.
         word_freqs = self.extract_words(text)
         if not word_freqs:
-            return False
+            return False, "new"
         words = []
         for word, freq in word_freqs.items():
             words.extend([word] * freq)
@@ -132,17 +138,17 @@ class Similarity:
         # Exact-match check against any previously seen page
         for stored_hash in self.url_exact_hashes.values():
             if stored_hash == exact_hash:
-                return True
+                return True, "exact"
 
         # Near-duplicate check (hamming_distance returns similarity 0-1)
         for stored_simhash in self.url_simhashes.values():
             if self.hamming_distance(stored_simhash, fingerprint) >= self.threshold:
-                return True
+                return True, "near"
 
         # New page — store under this URL so future pages can compare
         self.url_exact_hashes[url] = exact_hash
         self.url_simhashes[url] = fingerprint
-        return False
+        return False, "new"
 
     # IF ITS TOO HARSH AND I DONT WANNA LOWER THE AMT
     def extract_shingles(self, text, n=3):

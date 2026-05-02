@@ -1,7 +1,9 @@
 import re
 import atexit
+import datetime as _dt
 import hashlib
 from collections import Counter
+from time import strftime
 from urllib.parse import urlparse, urljoin, urlunparse, parse_qs
 from bs4 import BeautifulSoup
 
@@ -12,6 +14,7 @@ NUM_WORDS = 20
 USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
 
 
+
 '''analytic stuff'''
 STOP_WORDS = set(get_stop_words('en'))
 
@@ -19,7 +22,6 @@ unique_pages = set()    # unique URLs seen (fragment-stripped)
 longest_page = ("", 0)  # (url, word_count)
 word_freq = Counter()   # word frequencies across all crawled pages
 subdomains = {}         # netloc -> set of unique page URLs
-
 
 '''
 requirements to hit:
@@ -86,23 +88,20 @@ def extract_next_links(url, resp):
 
     words = text.split()
 
-    # Low-content check — skip pages with very little real text.
-    if len(words) < NUM_WORDS:
-        return []
+    # Always return the links we found, even from low content pages
+    if len(words) >= NUM_WORDS:
+        global longest_page
+        page_url = urlunparse(urlparse(url)._replace(fragment=""))
+        unique_pages.add(page_url)
+        subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
-    # it is now confirmed unqiue
-    global longest_page
-    page_url = urlunparse(urlparse(url)._replace(fragment=""))
-    unique_pages.add(page_url)
-    subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+        if len(words) > longest_page[1]:
+            longest_page = (page_url, len(words))
 
-    if len(words) > longest_page[1]:
-        longest_page = (page_url, len(words))
-
-    for w in words:
-        w = w.lower()
-        if w.isalpha() and w not in STOP_WORDS:
-            word_freq[w] += 1
+        for w in words:
+            w = w.lower()
+            if w.isalpha() and w not in STOP_WORDS:
+                word_freq[w] += 1
 
     return links
 
@@ -143,9 +142,7 @@ def take_text(url, resp, soup=None):
 
     
     # should call get_links BEFORE take_text
-    for tag in soup(["script", "style", "header", "footer", 
-                     "nav", "aside","form", "noscript", 
-                     "button", "iframe"]):
+    for tag in soup(["script", "style", "header", "footer", "nav"]):
         tag.decompose()
 
     full_text = soup.get_text(separator=" ")
@@ -203,9 +200,19 @@ def is_trap(url):
     if re.search(r"/\d{4}/\d{1,2}(/|$)", path_lower):
         return True
 
-    # ISO-date traps: /events/2024-01-15/, /posts/2024-01/, etc.
-    if re.search(r"/\d{4}-\d{1,2}(-\d{1,2})?(/|$)", path_lower):
-        return True
+
+    # # ISO-date traps: /events/2024-01-15/, /posts/2024-01/, etc.
+    # if re.search(r"/\d{4}-\d{1,2}(-\d{1,2})?(/|$)", path_lower):
+    #     return True
+    # might catch things that have dates in url
+    
+    # ISO-date traps: only treat full /YYYY-MM-DD/ as traps, AND only when
+    # the year is more than 3 years from current. Avoids false-positives
+    # on legit URLs like /research/2024-projects/ or /spring-2024-syllabus/.
+    current_year = _dt.date.today().year
+    for m in re.finditer(r"/((19|20)\d{2})-\d{1,2}-\d{1,2}(/|$)", path_lower):
+        if abs(int(m.group(1)) - current_year) > 3:
+            return True
 
     # calendar archive views
     if re.search(r"/events/(month|list|today)(/|$)", path_lower):
@@ -235,9 +242,12 @@ def is_trap(url):
     if any(k.lower() in tracking for k in query):
         return True
 
-    # repeated query keys (?page=1&page=2) usually means a pagination loop
-    if any(len(v) > 1 for v in query.values()):
-        return True
+    # repeated pagination keys (?page=1&page=2) means a pagination loop —
+    # but allow other repeated keys (e.g. ?tag=ml&tag=research is legit
+    # multi-value filtering on tag/faculty pages)
+    for key in {"page", "p", "start", "offset", "paged"}:
+        if len(query.get(key, [])) > 1:
+            return True
 
     # goodbye all images
     image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff")
