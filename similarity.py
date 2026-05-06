@@ -10,7 +10,7 @@ class Similarity:
 
     def __init__(self, hash_bits=64):
         self.hash_bits = hash_bits
-        self.threshold = 0.92
+        self.threshold = 0.95
         self.url_exact_hashes = {}
         self.url_simhashes = {}
 

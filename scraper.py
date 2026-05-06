@@ -78,6 +78,12 @@ def extract_next_links(url, resp):
     # Parse once — share the soup between link extraction and text extraction.
     soup = BeautifulSoup(resp.raw_response.content, "html.parser")
 
+    # Record the unique page here too, so direct callers (e.g. test_scraper.py)
+    # update counts. Worker also hits take_text first; sets make it idempotent.
+    page_url = urlunparse(urlparse(url)._replace(fragment=""))
+    unique_pages.add(page_url)
+    subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+
     # don't want to lose links living inside tags
     links = get_links(url, resp, soup=soup)
 
@@ -88,12 +94,9 @@ def extract_next_links(url, resp):
 
     words = text.split()
 
-    # Always return the links we found, even from low content pages
     if len(words) >= NUM_WORDS:
         global longest_page
         page_url = urlunparse(urlparse(url)._replace(fragment=""))
-        unique_pages.add(page_url)
-        subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
         if len(words) > longest_page[1]:
             longest_page = (page_url, len(words))
@@ -140,7 +143,11 @@ def take_text(url, resp, soup=None):
 
         soup = BeautifulSoup(resp.raw_response.content, "html.parser")
 
-    
+        # INCLUDES NEAR DUPLICATES
+        page_url = urlunparse(urlparse(url)._replace(fragment=""))
+        unique_pages.add(page_url)
+        subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+
     # should call get_links BEFORE take_text
     for tag in soup(["script", "style", "header", "footer", "nav"]):
         tag.decompose()
@@ -223,17 +230,18 @@ def is_trap(url):
     query = parse_qs(parsed.query)
 
     # doku is INFINITE CONTENT it is INSANE
-    if "/doku.php" in path_lower:
-        do_vals = {v.lower() for v in query.get("do", [])}
-        if do_vals & {"edit", "diff", "index", "recent",
-                      "backlink", "revisions", "media"}:
-            return True
-        if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
-            return True
+    # TODO : too harsh?
+    # if "/doku.php" in path_lower:
+    #     do_vals = {v.lower() for v in query.get("do", [])}
+    #     if do_vals & {"edit", "diff", "index", "recent",
+    #                   "backlink", "revisions", "media"}:
+    #         return True
+    #     if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
+    #         return True
 
     # doku endpoints
-    if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
-        return True
+    # if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
+    #     return True
 
     # tracking / session params — same page reached under many URLs
     tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
@@ -250,11 +258,12 @@ def is_trap(url):
             return True
 
     # goodbye all images
-    image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff")
-    for values in query.values():
-        for value in values:
-            if value.lower().endswith(image_types):
-                return True
+    # TODO : too harsh?
+    # image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff")
+    # for values in query.values():
+    #     for value in values:
+    #         if value.lower().endswith(image_types):
+    #             return True
 
     # too many pages likely pagination trap, e.g. ?page=1, ?page=2, ... ?page=10000
     for key, vals in query.items():
