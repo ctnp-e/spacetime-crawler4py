@@ -23,6 +23,26 @@ longest_page = ("", 0)  # (url, word_count)
 word_freq = Counter()   # word frequencies across all crawled pages
 subdomains = {}         # netloc -> set of unique page URLs
 
+
+# Trap detection patterns (see is_trap)
+# Add a new line here to add a new trap.
+_PATH_TRAPS = re.compile(
+    r"/\d{4}/\d{1,2}(/|$)"                               # calendar /YYYY/MM[/DD]
+    r"|/events/(month|list|today)(/|$)"                  # archive views
+    r"|/events/[^/]+/day/\d{4}-\d{2}-\d{2}"              # /events/X/day/YYYY-MM-DD
+    r"|/events/\d{4}-\d{2}-\d{2}/?$"                     # bare daily archive
+    r"|/events/month/\d{4}-\d{2}"                        # monthly view
+    r"|/events/list/page/\d+"                            # paginated list
+    r"|/events/(tag|category)/[^/]+/(list|month|page)"   # tag/category browsing
+    r"|/events/(tag|category)/[^/]+/\d{4}-\d{2}"         # tag/category month
+    r"|/lib/exe/(fetch|detail)\.php"                     # doku media endpoints
+)
+# needs a year-distance check, not a yes/no match
+_ISO_DATE_PATH = re.compile(r"/((19|20)\d{2})-\d{1,2}-\d{1,2}(/|$)")
+
+# used for tribe event date named keys (e.g. ?eventDate=2024-03-15)
+_DATE_IN_VALUE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
+
 '''
 requirements to hit:
 x Honor the politeness delay for each site
@@ -173,7 +193,7 @@ def is_valid(url):
             return False
 
         # too long of a url - basic trap
-        if len(url) > 1000:
+        if len(url) > 2000:
             return False
         
         return not re.match(
@@ -203,58 +223,60 @@ def is_trap(url):
     if len(segments) != len(set(segments)):
         return True
 
-    # calendar traps: /2024/01/ or /2024/01/15/ but not /cs121/2024/
-    if re.search(r"/\d{4}/\d{1,2}(/|$)", path_lower):
+    # all regex path traps
+    if _PATH_TRAPS.search(path_lower):
         return True
 
+    # treat full /YYYY-MM-DD/ as traps when the year is more than 3 years from current
 
-    # # ISO-date traps: /events/2024-01-15/, /posts/2024-01/, etc.
-    # if re.search(r"/\d{4}-\d{1,2}(-\d{1,2})?(/|$)", path_lower):
-    #     return True
-    # might catch things that have dates in url
-    
-    # ISO-date traps: only treat full /YYYY-MM-DD/ as traps, AND only when
-    # the year is more than 3 years from current. Avoids false-positives
-    # on legit URLs like /research/2024-projects/ or /spring-2024-syllabus/.
     current_year = _dt.date.today().year
-    for m in re.finditer(r"/((19|20)\d{2})-\d{1,2}-\d{1,2}(/|$)", path_lower):
+    for m in _ISO_DATE_PATH.finditer(path_lower):
         if abs(int(m.group(1)) - current_year) > 3:
             return True
 
-    # calendar archive views
-    if re.search(r"/events/(month|list|today)(/|$)", path_lower):
-        return True
-    if re.search(r"/events/[^/]+/day/\d{4}-\d{2}-\d{2}", path_lower):
-        return True
-
     query = parse_qs(parsed.query)
 
+    # Tribe-specific query params
+    tribe_keys = {"tribe-bar-date", "eventdisplay", "tribe_event_display",
+                  "tribe_paged", "ical", "outlook-ical", "icalendar"}
+    if any(k.lower() in tribe_keys for k in query):
+        return True
+    
+    # date-valued params in tribe/event/date-named keys (e.g. ?eventDate=2024-03-15)
+    for key, vals in query.items():
+        kl = key.lower()
+        if "tribe" in kl or "event" in kl or "date" in kl:
+            for v in vals:
+                if _DATE_IN_VALUE.search(v):
+                    return True
+
+    # parse_qs preserves case; normalize once so all key checks below are
+    # case-insensitive without re-lowering on every comparison.
+    query_keys_lower = {k.lower() for k in query.keys()}
+
     # doku is INFINITE CONTENT it is INSANE
-    # TODO : too harsh?
     if "/doku.php" in path_lower:
-        do_vals = {v.lower() for v in query.get("do", [])}
+        do_key = next((k for k in query if k.lower() == "do"), None)
+        do_vals = {v.lower() for v in query.get(do_key, [])} if do_key else set()
         if do_vals & {"edit", "diff", "index", "recent",
                       "backlink", "revisions", "media"}:
             return True
-        if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
+        if query_keys_lower & {"rev", "rev2", "difftype", "tab_files", "tab_details"}:
             return True
-
-    # doku endpoints
-    if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
-        return True
 
     # tracking / session params — same page reached under many URLs
     tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
                 "sid", "sessionid", "phpsessid", "jsessionid", "fbclid", "gclid",
                 "ref"}
-    if any(k.lower() in tracking for k in query):
+    if query_keys_lower & tracking:
         return True
 
     # repeated pagination keys (?page=1&page=2) means a pagination loop —
     # but allow other repeated keys (e.g. ?tag=ml&tag=research is legit
     # multi-value filtering on tag/faculty pages)
-    for key in {"page", "p", "start", "offset", "paged"}:
-        if len(query.get(key, [])) > 1:
+    pagination_keys = {"page", "p", "start", "offset", "paged"}
+    for key, vals in query.items():
+        if key.lower() in pagination_keys and len(vals) > 1:
             return True
 
     # goodbye all images
