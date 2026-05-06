@@ -48,6 +48,9 @@ class Worker(Thread):
                     
                 time.sleep(self.config.time_delay)
                 
+            elif not text:
+                self.logger.info(
+                    f"Skipped {tbd_url}: no extractable text.")
             else:
                 self.logger.info(
                     f"Skipped {tbd_url} due to {similarity_type} similarity.")

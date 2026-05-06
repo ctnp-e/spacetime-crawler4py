@@ -10,7 +10,7 @@ class Similarity:
 
     def __init__(self, hash_bits=64):
         self.hash_bits = hash_bits
-        self.threshold = 0.92
+        self.threshold = 0.95
         self.url_exact_hashes = {}
         self.url_simhashes = {}
 
@@ -29,8 +29,6 @@ class Similarity:
 
         word_freqs = {}
         for word in words:
-            # Drop stop words and very short tokens — they're shared by every
-            # page on the site and dominate the simhash with template noise.
             if word in _STOP_WORDS or len(word) < 3:
                 continue
             word_freqs[word] = word_freqs.get(word, 0) + 1
