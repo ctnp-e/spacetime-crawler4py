@@ -27,7 +27,7 @@ subdomains = {}         # netloc -> set of unique page URLs
 # Trap detection patterns (see is_trap)
 # Add a new line here to add a new trap.
 _PATH_TRAPS = re.compile(
-    r"/\d{4}/\d{1,2}(/|$)"                               # calendar /YYYY/MM[/DD]
+    r"/\d{4}/\d{1,2}(?:/\d{1,2})?/?$"                    # archive /YYYY/MM[/DD] only when path ENDS there (lets dated article slugs through)
     r"|/events/(month|list|today)(/|$)"                  # archive views
     r"|/events/[^/]+/day/\d{4}-\d{2}-\d{2}"              # /events/X/day/YYYY-MM-DD
     r"|/events/\d{4}-\d{2}-\d{2}/?$"                     # bare daily archive
@@ -235,12 +235,6 @@ def is_trap(url):
             return True
 
     query = parse_qs(parsed.query)
-
-    # Tribe-specific query params
-    tribe_keys = {"tribe-bar-date", "eventdisplay", "tribe_event_display",
-                  "tribe_paged", "ical", "outlook-ical", "icalendar"}
-    if any(k.lower() in tribe_keys for k in query):
-        return True
     
     # date-valued params in tribe/event/date-named keys (e.g. ?eventDate=2024-03-15)
     for key, vals in query.items():
@@ -254,17 +248,19 @@ def is_trap(url):
     # case-insensitive without re-lowering on every comparison.
     query_keys_lower = {k.lower() for k in query.keys()}
 
-    # doku is INFINITE CONTENT it is INSANE
-    if "/doku.php" in path_lower:
-        do_key = next((k for k in query if k.lower() == "do"), None)
-        do_vals = {v.lower() for v in query.get(do_key, [])} if do_key else set()
-        if do_vals & {"edit", "diff", "index", "recent",
-                      "backlink", "revisions", "media"}:
-            return True
-        if query_keys_lower & {"rev", "rev2", "difftype", "tab_files", "tab_details"}:
-            return True
+    # # doku is INFINITE CONTENT it is INSANE
+    # # too harsh......????????????????????????????
+    # if "/doku.php" in path_lower:
+    #     do_key = next((k for k in query if k.lower() == "do"), None)
+    #     do_vals = {v.lower() for v in query.get(do_key, [])} if do_key else set()
+    #     if do_vals & {"edit", "diff", "index", "recent",
+    #                   "backlink", "revisions", "media"}:
+    #         return True
+    #     if query_keys_lower & {"rev", "rev2", "difftype", "tab_files", "tab_details"}:
+    #         return True
 
-    # tracking / session params — same page reached under many URLs
+    # tracking / session params 
+    # block filters out URLs that have session/tracking query parameters
     tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
                 "sid", "sessionid", "phpsessid", "jsessionid", "fbclid", "gclid",
                 "ref"}
