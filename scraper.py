@@ -231,17 +231,17 @@ def is_trap(url):
 
     # doku is INFINITE CONTENT it is INSANE
     # TODO : too harsh?
-    # if "/doku.php" in path_lower:
-    #     do_vals = {v.lower() for v in query.get("do", [])}
-    #     if do_vals & {"edit", "diff", "index", "recent",
-    #                   "backlink", "revisions", "media"}:
-    #         return True
-    #     if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
-    #         return True
+    if "/doku.php" in path_lower:
+        do_vals = {v.lower() for v in query.get("do", [])}
+        if do_vals & {"edit", "diff", "index", "recent",
+                      "backlink", "revisions", "media"}:
+            return True
+        if {"rev", "rev2", "difftype", "tab_files", "tab_details"} & query.keys():
+            return True
 
     # doku endpoints
-    # if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
-    #     return True
+    if re.search(r"/lib/exe/(fetch|detail)\.php", path_lower):
+        return True
 
     # tracking / session params — same page reached under many URLs
     tracking = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
