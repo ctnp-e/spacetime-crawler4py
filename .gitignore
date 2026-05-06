@@ -111,3 +111,4 @@ venv.bak/
 test_scraper.py
 test_similarity.py
 report.txt
+minitests/test_traps.py
