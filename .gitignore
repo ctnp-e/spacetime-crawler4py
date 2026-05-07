@@ -112,3 +112,5 @@ test_scraper.py
 test_similarity.py
 report.txt
 minitests/test_traps.py
+minitests/test_log_similarity.py
+parse_log.py
