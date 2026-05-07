@@ -10,7 +10,7 @@ class Similarity:
 
     def __init__(self, hash_bits=64):
         self.hash_bits = hash_bits
-        self.threshold = 0.95
+        self.threshold = 0.92
         self.url_exact_hashes = {}
         self.url_simhashes = {}
 
@@ -111,26 +111,26 @@ class Similarity:
         # Exact-match hash on full page text
         exact_hash = self.specific_hash(text)
 
-        # Build a frequency-weighted word list, then simhash.
-        word_freqs = self.extract_words(text)
-        if not word_freqs:
-            return False, "new"
-        words = []
-        for word, freq in word_freqs.items():
-            words.extend([word] * freq)
+        # # Build a frequency-weighted word list, then simhash.
+        # word_freqs = self.extract_words(text)
+        # if not word_freqs:
+        #     return False, "new"
+        # words = []
+        # for word, freq in word_freqs.items():
+        #     words.extend([word] * freq)
 
-        fingerprint = self.simhash(words)
+        # fingerprint = self.simhash(words)
 
         
-        # # shingle weighted if we need it
-        # shingle_freqs = self.extract_shingles(text, n=3)
-        # if not shingle_freqs:
-        #     return False, "new"
-        # tokens = []
-        # for shingle, freq in shingle_freqs.items():
-        #     tokens.extend([shingle] * freq)
+        # shingle weighted if we need it
+        shingle_freqs = self.extract_shingles(text, n=3)
+        if not shingle_freqs:
+            return False, "new"
+        tokens = []
+        for shingle, freq in shingle_freqs.items():
+            tokens.extend([shingle] * freq)
 
-        # fingerprint = self.simhash(tokens)
+        fingerprint = self.simhash(tokens)
         
 
         # Exact-match check against any previously seen page
