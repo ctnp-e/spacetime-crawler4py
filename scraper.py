@@ -37,8 +37,9 @@ _PATH_TRAPS = re.compile(
     r"|/events/(tag|category)/[^/]+/\d{4}-\d{2}"         # tag/category month
     r"|/lib/exe/(fetch|detail)\.php"                     # doku media endpoints
 )
-# needs a year-distance check, not a yes/no match
-_ISO_DATE_PATH = re.compile(r"/((19|20)\d{2})-\d{1,2}-\d{1,2}(/|$)")
+# too harsh. 
+# # needs a year-distance check, not a yes/no match
+# _ISO_DATE_PATH = re.compile(r"/((19|20)\d{2})-\d{1,2}-\d{1,2}(/|$)")
 
 # used for tribe event date named keys (e.g. ?eventDate=2024-03-15)
 _DATE_IN_VALUE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
@@ -227,12 +228,13 @@ def is_trap(url):
     if _PATH_TRAPS.search(path_lower):
         return True
 
-    # treat full /YYYY-MM-DD/ as traps when the year is more than 3 years from current
+    # too harsh!!!
+    # # treat full /YYYY-MM-DD/ as traps when the year is more than 3 years from current
 
-    current_year = _dt.date.today().year
-    for m in _ISO_DATE_PATH.finditer(path_lower):
-        if abs(int(m.group(1)) - current_year) > 3:
-            return True
+    # current_year = _dt.date.today().year
+    # for m in _ISO_DATE_PATH.finditer(path_lower):
+    #     if abs(int(m.group(1)) - current_year) > 3:
+    #         return True
 
     query = parse_qs(parsed.query)
     
