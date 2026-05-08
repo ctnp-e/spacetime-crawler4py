@@ -250,16 +250,21 @@ def is_trap(url):
     # case-insensitive without re-lowering on every comparison.
     query_keys_lower = {k.lower() for k in query.keys()}
 
-    # # doku is INFINITE CONTENT it is INSANE
-    # # too harsh......????????????????????????????
-    # if "/doku.php" in path_lower:
-    #     do_key = next((k for k in query if k.lower() == "do"), None)
-    #     do_vals = {v.lower() for v in query.get(do_key, [])} if do_key else set()
-    #     if do_vals & {"edit", "diff", "index", "recent",
-    #                   "backlink", "revisions", "media"}:
-    #         return True
-    #     if query_keys_lower & {"rev", "rev2", "difftype", "tab_files", "tab_details"}:
-    #         return True
+    # doku is INFINITE CONTENT it is INSANE
+    # not harsh enough.  i hate doku.
+    if "/doku.php" in path_lower:
+        do_key = next((k for k in query if k.lower() == "do"), None)
+        do_vals = {v.lower() for v in query.get(do_key, [])} if do_key else set()
+        # bare ?do= (empty value) just re-renders the canonical = exact dup
+        if do_key and not any(v.strip() for v in query.get(do_key, [])):
+            return True
+        if do_vals & {"edit", "diff", "index", "recent",
+                      "backlink", "revisions", "media",
+                      "export_pdf", "export_code", "login"}:
+            return True
+        if query_keys_lower & {"rev", "rev2", "difftype", "tab_files", "tab_details",
+                               "sectok", "codeblock"}:
+            return True
 
     # tracking / session params 
     # block filters out URLs that have session/tracking query parameters
