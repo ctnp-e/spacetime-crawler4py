@@ -45,28 +45,8 @@ _PATH_TRAPS = re.compile(
 _DATE_IN_VALUE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
 
 '''
-requirements to hit:
-x Honor the politeness delay for each site
-x Crawl all pages with high textual information content
-? Detect and avoid infinite traps
-? Detect and avoid sets of similar pages with no information
-x   - no duplicate pages (e.g. by content hash)
-x   - no near-duplicate pages (e.g. by content similarity)
-x Detect and avoid dead URLs that return a 200 status but no data 
-x Detect and avoid crawling very large files, especially if they have low information value
-
 TODO:
-x NEAR DUPLICATES!!!
-x stop_words?
-  local storage instead?!
-  implement multithreading?
-
-x calculate the most common words
-  find longest page
-  find total numsubdomains 
-       Submit the list of subdomains ordered alphabetically and the number of unique pages detected in each subdomain. The content of this list should be lines containing subdomain, number, for example:
-       vision.ics.uci.edu, 100
-x how many unique pages
+MULTITHREADING!!!!!!!!!!!!!!!
 '''
 
 def scraper(url, resp):
@@ -170,7 +150,16 @@ def take_text(url, resp, soup=None):
         subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
     # should call get_links BEFORE take_text
-    for tag in soup(["script", "style", "header", "footer", "nav"]):
+    for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
+        tag.decompose()
+
+    # Doku renders its sidebar/breadcrumbs/page-tools in divs, not semantic
+    # tags, so the same chrome appears verbatim on every page and tanks the
+    # near-dup hash. Strip the standard dokuwiki containers; no-op elsewhere.
+    for tag in soup.select(
+        "#dokuwiki__aside, #dokuwiki__pagetools, #dokuwiki__sitetools, "
+        "#dw__toc, .breadcrumbs, .trace, .sidebar, .aside, .dw-aside"
+    ):
         tag.decompose()
 
     full_text = soup.get_text(separator=" ")
