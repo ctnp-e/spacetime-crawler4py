@@ -157,10 +157,21 @@ def get_links(url, resp, soup=None):
         Pass an existing soup to avoid re-parsing. '''
     if soup is None:
         soup = BeautifulSoup(resp.raw_response.content, "html.parser")
-    all_hrefs = soup.find_all("a", href=True)
+
+    # Pick the right base for relative-href resolution. Without this, Apache
+    # directory pages (frontier-normalized to drop the trailing slash) resolve
+    # 'highlevel/' to '/data/highlevel/' instead of '/data/hepjets/highlevel/',
+    # silently killing entry into the directory's children.
+    # Priority: <base href=...> > post-redirect response URL > requested URL.
+    base_tag = soup.find("base", href=True)
+    if base_tag and base_tag.get("href"):
+        base_url = urljoin(url, base_tag["href"])
+    else:
+        base_url = getattr(resp.raw_response, "url", None) or url
+
     links = []
-    for tag in all_hrefs:
-        link = urljoin(url, tag["href"])
+    for tag in soup.find_all("a", href=True):
+        link = urljoin(base_url, tag["href"])
         link = urlunparse(urlparse(link)._replace(fragment=""))
         links.append(link)
     return links
