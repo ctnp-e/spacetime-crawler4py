@@ -1,6 +1,7 @@
 
 import hashlib
 import re
+import threading
 from stop_words import get_stop_words
 
 _STOP_WORDS = set(get_stop_words('en'))
@@ -13,6 +14,9 @@ class Similarity:
         self.threshold = 0.92
         self.url_exact_hashes = {}
         self.url_simhashes = {}
+        # Guards the two fingerprint dicts so multiple workers can share
+        # one Similarity instance without racing on check-and-set.
+        self._lock = threading.Lock()
 
     def specific_hash (self, word):
         # DONT USE MD5
@@ -131,22 +135,22 @@ class Similarity:
             tokens.extend([shingle] * freq)
 
         fingerprint = self.simhash(tokens)
-        
 
-        # Exact-match check against any previously seen page
-        for stored_hash in self.url_exact_hashes.values():
-            if stored_hash == exact_hash:
-                return True, "exact"
+        # Fingerprint compute is pure CPU and deterministic, so we do it
+        # outside the lock. Only the scan-and-insert needs to be atomic
+        # (otherwise two workers can both decide a near-dup is "new").
+        with self._lock:
+            for stored_hash in self.url_exact_hashes.values():
+                if stored_hash == exact_hash:
+                    return True, "exact"
 
-        # Near-duplicate check (hamming_distance returns similarity 0-1)
-        for stored_simhash in self.url_simhashes.values():
-            if self.hamming_distance(stored_simhash, fingerprint) >= self.threshold:
-                return True, "near"
+            for stored_simhash in self.url_simhashes.values():
+                if self.hamming_distance(stored_simhash, fingerprint) >= self.threshold:
+                    return True, "near"
 
-        # New page — store under this URL so future pages can compare
-        self.url_exact_hashes[url] = exact_hash
-        self.url_simhashes[url] = fingerprint
-        return False, "new"
+            self.url_exact_hashes[url] = exact_hash
+            self.url_simhashes[url] = fingerprint
+            return False, "new"
 
     # IF ITS TOO HARSH AND I DONT WANNA LOWER THE AMT
     def extract_shingles(self, text, n=3):

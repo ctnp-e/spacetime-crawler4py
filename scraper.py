@@ -14,6 +14,12 @@ from stop_words import get_stop_words
 NUM_WORDS = 20
 USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
 
+# MAX_BYTES — "very large files, especially low information value"
+# MIN_BYTES — "dead URLs that return a 200 status but no data"
+# 200 B catches blank/whitespace-only "soft-200" responses but lets through legitimately terse pages.
+MAX_BYTES = 8 * 1024 * 1024
+MIN_BYTES = 200
+
 
 
 '''analytic stuff'''
@@ -98,6 +104,14 @@ def extract_next_links(url, resp):
                      or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
         return []
 
+    # Body-size guards (see MAX_BYTES / MIN_BYTES at top of file)
+    content_length = headers.get("Content-Length") or headers.get("content-length") or ""
+    if content_length.isdigit() and int(content_length) > MAX_BYTES:
+        return []
+    raw_bytes = getattr(resp.raw_response, "content", b"") or b""
+    if not (MIN_BYTES <= len(raw_bytes) <= MAX_BYTES):
+        return []
+
     # Decode bytes → str with explicit charset detection before handing to BS4.
     decoded = _decode_content(resp, content_type)
     if not decoded:
@@ -169,6 +183,14 @@ def take_text(url, resp, soup=None):
         mime = content_type.split(";", 1)[0].strip().lower()
         if mime and not (mime.startswith("text/")
                          or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
+            return None
+
+        # path so dead-200s and oversize files are logged consistently.
+        content_length = headers.get("Content-Length") or headers.get("content-length") or ""
+        if content_length.isdigit() and int(content_length) > MAX_BYTES:
+            return None
+        raw_bytes = getattr(resp.raw_response, "content", b"") or b""
+        if not (MIN_BYTES <= len(raw_bytes) <= MAX_BYTES):
             return None
 
         decoded = _decode_content(resp, content_type)
