@@ -2,6 +2,7 @@ import re
 import atexit
 import datetime as _dt
 import hashlib
+import threading
 from collections import Counter
 from time import strftime
 from urllib.parse import urlparse, urljoin, urlunparse, parse_qs
@@ -22,6 +23,27 @@ unique_pages = set()    # unique URLs seen (fragment-stripped)
 longest_page = ("", 0)  # (url, word_count)
 word_freq = Counter()   # word frequencies across all crawled pages
 subdomains = {}         # netloc -> set of unique page URLs
+_stats_lock = threading.Lock()
+
+
+def _decode_content(resp, content_type):
+    """Decode raw response bytes to a string using charset from the Content-Type header.
+    Falls back to the requests-detected encoding, then utf-8."""
+    raw_bytes = getattr(resp.raw_response, "content", None)
+    if not raw_bytes:
+        return None
+
+    charset_match = re.search(r"charset=([A-Za-z0-9_\-]+)", content_type, re.IGNORECASE)
+    encoding = charset_match.group(1) if charset_match else None
+    if not encoding:
+        encoding = getattr(resp.raw_response, "encoding", None)
+    if not encoding:
+        encoding = "utf-8"
+
+    try:
+        return raw_bytes.decode(encoding, errors="replace")
+    except Exception:
+        return raw_bytes.decode("utf-8", errors="replace")
 
 
 # Trap detection patterns (see is_trap)
@@ -76,14 +98,20 @@ def extract_next_links(url, resp):
                      or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
         return []
 
+    # Decode bytes → str with explicit charset detection before handing to BS4.
+    decoded = _decode_content(resp, content_type)
+    if not decoded:
+        return []
+
     # Parse once — share the soup between link extraction and text extraction.
-    soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+    soup = BeautifulSoup(decoded, "html.parser")
 
     # Record the unique page here too, so direct callers (e.g. test_scraper.py)
     # update counts. Worker also hits take_text first; sets make it idempotent.
     page_url = urlunparse(urlparse(url)._replace(fragment=""))
-    unique_pages.add(page_url)
-    subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+    with _stats_lock:
+        unique_pages.add(page_url)
+        subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
     # don't want to lose links living inside tags
     links = get_links(url, resp, soup=soup)
@@ -91,7 +119,7 @@ def extract_next_links(url, resp):
     text = take_text(url, resp, soup=soup)
 
     if not text:
-        return []
+        return links   # don't discard already-found links just because text extraction failed
 
     words = text.split()
 
@@ -99,13 +127,14 @@ def extract_next_links(url, resp):
         global longest_page
         page_url = urlunparse(urlparse(url)._replace(fragment=""))
 
-        if len(words) > longest_page[1]:
-            longest_page = (page_url, len(words))
+        with _stats_lock:
+            if len(words) > longest_page[1]:
+                longest_page = (page_url, len(words))
 
-        for w in words:
-            w = w.lower()
-            if w.isalpha() and w not in STOP_WORDS:
-                word_freq[w] += 1
+            for w in words:
+                w = w.lower()
+                if w.isalpha() and w not in STOP_WORDS:
+                    word_freq[w] += 1
 
     return links
 
@@ -142,12 +171,16 @@ def take_text(url, resp, soup=None):
                          or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
             return None
 
-        soup = BeautifulSoup(resp.raw_response.content, "html.parser")
+        decoded = _decode_content(resp, content_type)
+        if not decoded:
+            return None
+        soup = BeautifulSoup(decoded, "html.parser")
 
         # INCLUDES NEAR DUPLICATES
         page_url = urlunparse(urlparse(url)._replace(fragment=""))
-        unique_pages.add(page_url)
-        subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+        with _stats_lock:
+            unique_pages.add(page_url)
+            subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
     # should call get_links BEFORE take_text
     for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
