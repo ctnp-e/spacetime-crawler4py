@@ -9,6 +9,9 @@ from queue import Queue, Empty
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid
 
+_SYNC_EVERY = 100  # ops between shelve.sync() flushes — see _maybe_sync
+
+
 class Frontier(object):
     def __init__(self, config, restart):
         self.logger = get_logger("FRONTIER")
@@ -16,6 +19,11 @@ class Frontier(object):
         self.to_be_downloaded = Queue()
         self._cond = Condition()
         self._in_flight = 0
+        # dbm.dumb rewrites its index on every sync(). At ~100 links/page that
+        # was millions of disk flushes per crawl. Batch instead — at most
+        # _SYNC_EVERY ops of progress is at risk on SIGKILL, and similarity
+        # catches accidental re-crawls.
+        self._sync_counter = 0
         
         if not os.path.exists(self.config.save_file) and not restart:
             # Save file does not exist, but request to load save.
@@ -69,13 +77,21 @@ class Frontier(object):
                         return None
                     self._cond.wait(timeout=1.0)
 
+    def _maybe_sync(self):
+        # Caller must hold self._cond. Batches shelve.sync() to one flush
+        # per _SYNC_EVERY ops instead of one per write.
+        self._sync_counter += 1
+        if self._sync_counter >= _SYNC_EVERY:
+            self._sync_counter = 0
+            self.save.sync()
+
     def add_url(self, url):
         url = normalize(url)
         urlhash = get_urlhash(url)
         with self._cond:
             if urlhash not in self.save:
                 self.save[urlhash] = (url, False)
-                self.save.sync()
+                self._maybe_sync()
                 self.to_be_downloaded.put(url)
                 self._cond.notify_all()
 
@@ -86,6 +102,6 @@ class Frontier(object):
                 self.logger.error(
                     f"Completed url {url}, but have not seen it before.")
             self.save[urlhash] = (url, True)
-            self.save.sync()
+            self._maybe_sync()
             self._in_flight -= 1
             self._cond.notify_all()

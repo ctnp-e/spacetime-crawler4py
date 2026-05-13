@@ -98,6 +98,9 @@ def _parse_for_extraction(url, resp):
     # check, so near-duplicates flagged by simhash don't inflate the counts.
     raw_links = get_links(url, resp, soup=soup)
     text = take_text(url, resp, soup=soup)
+    # Free the parse tree immediately. Without this, BS4 keeps the whole tree
+    # alive until GC catches up — under 4 workers that bunched into spikes.
+    soup.decompose()
     return text, raw_links
 
 
