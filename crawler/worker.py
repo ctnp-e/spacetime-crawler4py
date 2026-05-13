@@ -4,6 +4,7 @@ from inspect import getsource
 from utils.download import download
 from utils import get_logger
 import scraper
+import analytics
 
 
 class Worker(Thread):
@@ -44,7 +45,7 @@ class Worker(Thread):
                     # Commit analytics only after the similarity check, so
                     # near-duplicates flagged by simhash don't inflate the
                     # unique-pages count.
-                    scraper.record_page(tbd_url, text)
+                    analytics.record_page(tbd_url, text)
 
                     # Harvest links regardless of whether text was extractable —
                     # directory listings / faceted pages have valid hrefs even
