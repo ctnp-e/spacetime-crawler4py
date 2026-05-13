@@ -28,8 +28,27 @@ STOP_WORDS = set(get_stop_words('en'))
 unique_pages = set()    # unique URLs seen (fragment-stripped)
 longest_page = ("", 0)  # (url, word_count)
 word_freq = Counter()   # word frequencies across all crawled pages
-subdomains = {}         # netloc -> set of unique page URLs
+subdomains = {}         # netloc -> count of unique pages (int, not set of URLs)
 _stats_lock = threading.Lock()
+
+# Periodic snapshot of the report so SIGKILL/OOM doesn't wipe out the run.
+# atexit only fires on a clean exit — these crawls have been getting killed
+# externally with all state still in memory.
+_CHECKPOINT_EVERY = 200
+_checkpoint_counter = 0
+_checkpoint_lock = threading.Lock()
+
+
+def _checkpoint_if_due():
+    global _checkpoint_counter
+    with _checkpoint_lock:
+        _checkpoint_counter += 1
+        if _checkpoint_counter % _CHECKPOINT_EVERY != 0:
+            return
+    try:
+        generate_report()
+    except Exception:
+        pass
 
 
 def _decode_content(resp, content_type):
@@ -112,9 +131,11 @@ def _parse_for_extraction(url, resp):
     soup = BeautifulSoup(decoded, "html.parser")
 
     page_url = urlunparse(urlparse(url)._replace(fragment=""))
+    netloc = urlparse(page_url).netloc.lower()
     with _stats_lock:
-        unique_pages.add(page_url)
-        subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+        if page_url not in unique_pages:
+            unique_pages.add(page_url)
+            subdomains[netloc] = subdomains.get(netloc, 0) + 1
 
     raw_links = get_links(url, resp, soup=soup)
     text = take_text(url, resp, soup=soup)
@@ -122,15 +143,21 @@ def _parse_for_extraction(url, resp):
     if text:
         words = text.split()
         if len(words) >= NUM_WORDS:
+            # Filter outside the lock — only the dict updates need to be atomic.
+            # Previously the full per-word loop ran inside the lock, serializing
+            # all 4 workers through long pages.
+            filtered = []
+            for w in words:
+                wl = w.lower()
+                if wl.isalpha() and wl not in STOP_WORDS:
+                    filtered.append(wl)
             global longest_page
             with _stats_lock:
                 if len(words) > longest_page[1]:
                     longest_page = (page_url, len(words))
-                for w in words:
-                    w = w.lower()
-                    if w.isalpha() and w not in STOP_WORDS:
-                        word_freq[w] += 1
+                word_freq.update(filtered)
 
+    _checkpoint_if_due()
     return text, raw_links
 
 
@@ -196,9 +223,11 @@ def take_text(url, resp, soup=None):
 
         # INCLUDES NEAR DUPLICATES
         page_url = urlunparse(urlparse(url)._replace(fragment=""))
+        netloc = urlparse(page_url).netloc.lower()
         with _stats_lock:
-            unique_pages.add(page_url)
-            subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
+            if page_url not in unique_pages:
+                unique_pages.add(page_url)
+                subdomains[netloc] = subdomains.get(netloc, 0) + 1
 
     # should call get_links BEFORE take_text
     for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
@@ -357,7 +386,7 @@ def generate_report(path="report.txt"):
 
         f.write("4. Subdomains (alphabetical):\n")
         for netloc in sorted(subdomains):
-            f.write(f"   {netloc}, {len(subdomains[netloc])}\n")
+            f.write(f"   {netloc}, {subdomains[netloc]}\n")
     print(f"[report] Written to {path}")
 
 atexit.register(generate_report)

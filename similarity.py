@@ -12,10 +12,14 @@ class Similarity:
     def __init__(self, hash_bits=64):
         self.hash_bits = hash_bits
         self.threshold = 0.90
-        self.url_exact_hashes = {}
-        self.url_simhashes = {}
-        # Guards the two fingerprint dicts so multiple workers can share
-        # one Similarity instance without racing on check-and-set.
+        # URL keys aren't used by lookups (only .values() was iterated), and
+        # storing every crawled URL as a dict key was a real memory hog at
+        # 18K+ pages. set gives O(1) exact-hash check; list keeps simhash
+        # scan the same O(n) it was before.
+        self.exact_hashes = set()
+        self.simhashes = []
+        # Guards both stores so multiple workers can share one Similarity
+        # instance without racing on check-and-set.
         self._lock = threading.Lock()
 
     def specific_hash (self, word):
@@ -50,10 +54,6 @@ class Similarity:
         h = self.specific_hash(word)
         hash_int = int(h, 16)
         return hash_int & ((1 << self.hash_bits) - 1)
-
-    def print_sim_percentage(self, url1, url2):
-        sim_percentage = self.hamming_distance(self.url_simhashes[url1], self.url_simhashes[url2])
-        print(f"Similarity between {url1} and {url2}: {sim_percentage:.2%}")
 
     def simhash(self, words):
         '''
@@ -140,16 +140,15 @@ class Similarity:
         # outside the lock. Only the scan-and-insert needs to be atomic
         # (otherwise two workers can both decide a near-dup is "new").
         with self._lock:
-            for stored_hash in self.url_exact_hashes.values():
-                if stored_hash == exact_hash:
-                    return True, "exact"
+            if exact_hash in self.exact_hashes:
+                return True, "exact"
 
-            for stored_simhash in self.url_simhashes.values():
+            for stored_simhash in self.simhashes:
                 if self.hamming_distance(stored_simhash, fingerprint) >= self.threshold:
                     return True, "near"
 
-            self.url_exact_hashes[url] = exact_hash
-            self.url_simhashes[url] = fingerprint
+            self.exact_hashes.add(exact_hash)
+            self.simhashes.append(fingerprint)
             return False, "new"
 
     # IF ITS TOO HARSH AND I DONT WANNA LOWER THE AMT
