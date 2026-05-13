@@ -36,6 +36,13 @@ _PATH_TRAPS = re.compile(
 # used for tribe event date named keys (e.g. ?eventDate=2024-03-15)
 _DATE_IN_VALUE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
 
+# Photo-wrapper detection thresholds — see _is_photo_wrapper.
+# A page is a "wrapper" if it has an <img>, fewer than this many text words,
+# and fewer than this many outbound links. The eppstein soccer pages each
+# had ~3 links (prev/next/index) and ~5 words of text.
+_WRAPPER_MAX_WORDS = 50
+_WRAPPER_MAX_LINKS = 10
+
 '''
 TODO:
 MULTITHREADING!!!!!!!!!!!!!!!
@@ -323,7 +330,18 @@ def _parse_for_extraction(url, resp):
     # NOT updated here. The worker calls record_page() AFTER the similarity
     # check, so near-duplicates flagged by simhash don't inflate the counts.
     raw_links = get_links(url, resp, soup=soup)
+    # Detect photo-wrappers BEFORE take_text decomposes chrome — we need the
+    # <img> tags intact. Once detected, we drop the page's outbound links so
+    # the frontier doesn't refill with sibling wrappers. This is the general
+    # circuit-breaker for any sparse-text leaf with image content (faculty
+    # photo trees, doku image stubs, calendar-day pages, etc).
+    has_image = soup.find("img") is not None
     text = take_text(url, resp, soup=soup)
+    if (has_image
+            and text is not None
+            and len(text.split()) < _WRAPPER_MAX_WORDS
+            and len(raw_links) < _WRAPPER_MAX_LINKS):
+        raw_links = []
     # Free the parse tree immediately. Without this, BS4 keeps the whole tree
     # alive until GC catches up — under 4 workers that bunched into spikes.
     soup.decompose()
