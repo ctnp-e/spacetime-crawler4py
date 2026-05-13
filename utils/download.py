@@ -33,16 +33,21 @@ def download(url, config, logger=None):
 
     host, port = config.cache_server
 
-    # first tests the lock
     with host_lock:
         wait = (rec[1] + delay) - time.monotonic()
         if wait > 0:
-            # waits if lock not real
             time.sleep(wait)
-        resp = requests.get(
-            # boom . go time
-            f"http://{host}:{port}/",
-            params=[("q", f"{url}"), ("u", f"{config.user_agent}")])
+            # attempt at fixing the . uh. sigkill i get
+        try:
+            resp = requests.get(
+                f"http://{host}:{port}/",
+                params=[("q", f"{url}"), ("u", f"{config.user_agent}")],
+                timeout=(10, 30)) # if it goes on for too long
+        except requests.exceptions.Timeout:
+            if logger:
+                logger.error(f"Timeout fetching {url}")
+            rec[1] = time.monotonic()
+            return Response({"error": f"Timeout fetching {url}", "status": 408, "url": url})
         rec[1] = time.monotonic()
 
     try:

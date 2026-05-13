@@ -136,20 +136,24 @@ class Similarity:
 
         fingerprint = self.simhash(tokens)
 
-        # Fingerprint compute is pure CPU and deterministic, so we do it
-        # outside the lock. Only the scan-and-insert needs to be atomic
-        # (otherwise two workers can both decide a near-dup is "new").
         with self._lock:
             if exact_hash in self.exact_hashes:
                 return True, "exact"
+            # Snapshot so the O(n) scan runs outside the lock.
+            # Workers can proceed in parallel
+            # re-check under the lock before inserting.
+            snapshot = list(self.simhashes)
 
-            for stored_simhash in self.simhashes:
-                if self.hamming_distance(stored_simhash, fingerprint) >= self.threshold:
-                    return True, "near"
+        for stored_simhash in snapshot:
+            if self.hamming_distance(stored_simhash, fingerprint) >= self.threshold:
+                return True, "near"
 
-            self.exact_hashes.add(exact_hash)
-            self.simhashes.append(fingerprint)
-            return False, "new"
+        with self._lock:
+            # Re-check exact hash in case another thread added this page while we scanned.
+            if exact_hash not in self.exact_hashes:
+                self.exact_hashes.add(exact_hash)
+                self.simhashes.append(fingerprint)
+        return False, "new"
 
     # IF ITS TOO HARSH AND I DONT WANNA LOWER THE AMT
     def extract_shingles(self, text, n=3):
