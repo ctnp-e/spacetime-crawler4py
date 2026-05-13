@@ -114,3 +114,12 @@ report.txt
 minitests/test_traps.py
 minitests/test_log_similarity.py
 parse_log.py
+info/analyze_doku_log.py
+info/doku_included.txt
+.gitignore
+info/report_funny.txt
+.gitignore
+minitests/test_doku_similarity.py
+minitests/test_scraper_multithreaded.py
+.gitignore
+info/doku_log_analysis.txt
