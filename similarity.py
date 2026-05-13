@@ -11,7 +11,7 @@ class Similarity:
 
     def __init__(self, hash_bits=64):
         self.hash_bits = hash_bits
-        self.threshold = 0.90
+        self.threshold = 0.89
         # URL keys aren't used by lookups (only .values() was iterated), and
         # storing every crawled URL as a dict key was a real memory hog at
         # 18K+ pages. set gives O(1) exact-hash check; list keeps simhash
