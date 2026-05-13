@@ -10,8 +10,8 @@ _SINGLE_CHAR_THRESHOLD = 0.5  # if more than half the tokens are single chars, i
 
 # MAX_BYTES — "very large files, especially low information value"
 # MIN_BYTES — "dead URLs that return a 200 status but no data"
-# 200 B catches blank/whitespace-only "soft-200" responses but lets through legitimately terse pages.
-MAX_BYTES = 8 * 1024 * 1024
+# data dumps are ignored. they are useless, not much information.
+MAX_BYTES = 2 * 1024 * 1024
 MIN_BYTES = 200
 
 
