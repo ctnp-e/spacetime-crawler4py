@@ -41,6 +41,11 @@ class Worker(Thread):
                     self.logger.info(
                         f"Skipped {tbd_url} due to {similarity_type} similarity.")
                 else:
+                    # Commit analytics only after the similarity check, so
+                    # near-duplicates flagged by simhash don't inflate the
+                    # unique-pages count.
+                    scraper.record_page(tbd_url, text)
+
                     # Harvest links regardless of whether text was extractable —
                     # directory listings / faceted pages have valid hrefs even
                     # when our chrome-stripping leaves take_text returning "".

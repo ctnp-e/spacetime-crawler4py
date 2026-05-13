@@ -130,22 +130,41 @@ def _parse_for_extraction(url, resp):
 
     soup = BeautifulSoup(decoded, "html.parser")
 
+    # Note: analytics (unique_pages, subdomains, word_freq, longest_page) are
+    # NOT updated here. The worker calls record_page() AFTER the similarity
+    # check, so near-duplicates flagged by simhash don't inflate the counts.
+    raw_links = get_links(url, resp, soup=soup)
+    text = take_text(url, resp, soup=soup)
+    return text, raw_links
+
+
+def process_response(url, resp):
+    # for workers to parse
+    # same work as take_text() + scraper.scraper(), but with one BS4 build instead of two
+    text, raw_links = _parse_for_extraction(url, resp)
+    return text, [link for link in raw_links if is_valid(link)]
+
+
+def record_page(url, text):
+    """Commit analytics for a page that passed the similarity check.
+
+    Called by the worker only when is_similar returned False. Updates
+    unique_pages, subdomains, longest_page, and word_freq. Also ticks the
+    on-disk-report checkpoint.
+    """
     page_url = urlunparse(urlparse(url)._replace(fragment=""))
     netloc = urlparse(page_url).netloc.lower()
     with _stats_lock:
-        if page_url not in unique_pages:
-            unique_pages.add(page_url)
-            subdomains[netloc] = subdomains.get(netloc, 0) + 1
-
-    raw_links = get_links(url, resp, soup=soup)
-    text = take_text(url, resp, soup=soup)
+        if page_url in unique_pages:
+            # Same URL parsed twice (e.g. two paths normalize the same).
+            # Already counted; nothing to do.
+            return
+        unique_pages.add(page_url)
+        subdomains[netloc] = subdomains.get(netloc, 0) + 1
 
     if text:
         words = text.split()
         if len(words) >= NUM_WORDS:
-            # Filter outside the lock — only the dict updates need to be atomic.
-            # Previously the full per-word loop ran inside the lock, serializing
-            # all 4 workers through long pages.
             filtered = []
             for w in words:
                 wl = w.lower()
@@ -158,14 +177,6 @@ def _parse_for_extraction(url, resp):
                 word_freq.update(filtered)
 
     _checkpoint_if_due()
-    return text, raw_links
-
-
-def process_response(url, resp):
-    # for workers to parse
-    # same work as take_text() + scraper.scraper(), but with one BS4 build instead of two
-    text, raw_links = _parse_for_extraction(url, resp)
-    return text, [link for link in raw_links if is_valid(link)]
 
 def get_links(url, resp, soup=None):
     ''' Extract and return all hyperlinks from the page content.
@@ -220,14 +231,8 @@ def take_text(url, resp, soup=None):
         if not decoded:
             return None
         soup = BeautifulSoup(decoded, "html.parser")
-
-        # INCLUDES NEAR DUPLICATES
-        page_url = urlunparse(urlparse(url)._replace(fragment=""))
-        netloc = urlparse(page_url).netloc.lower()
-        with _stats_lock:
-            if page_url not in unique_pages:
-                unique_pages.add(page_url)
-                subdomains[netloc] = subdomains.get(netloc, 0) + 1
+        # Analytics are now committed via record_page() from the worker
+        # after the similarity check — not here.
 
     # should call get_links BEFORE take_text
     for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
