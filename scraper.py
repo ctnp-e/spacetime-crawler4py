@@ -6,6 +6,7 @@ from urllib.parse import urlparse, urljoin, urlunparse, parse_qs
 from bs4 import BeautifulSoup
 
 USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
+_SINGLE_CHAR_THRESHOLD = 0.5  # if more than half the tokens are single chars, it's garbage
 
 # MAX_BYTES — "very large files, especially low information value"
 # MIN_BYTES — "dead URLs that return a 200 status but no data"
@@ -13,25 +14,6 @@ USEFUL_RATIO = 0.1  # minimum words-per-tag; below this = markup-heavy, low info
 MAX_BYTES = 8 * 1024 * 1024
 MIN_BYTES = 200
 
-
-def _decode_content(resp, content_type):
-    """Decode raw response bytes to a string using charset from the Content-Type header.
-    Falls back to the requests-detected encoding, then utf-8."""
-    raw_bytes = getattr(resp.raw_response, "content", None)
-    if not raw_bytes:
-        return None
-
-    charset_match = re.search(r"charset=([A-Za-z0-9_\-]+)", content_type, re.IGNORECASE)
-    encoding = charset_match.group(1) if charset_match else None
-    if not encoding:
-        encoding = getattr(resp.raw_response, "encoding", None)
-    if not encoding:
-        encoding = "utf-8"
-
-    try:
-        return raw_bytes.decode(encoding, errors="replace")
-    except Exception:
-        return raw_bytes.decode("utf-8", errors="replace")
 
 
 # Trap detection patterns (see is_trap)
@@ -64,44 +46,6 @@ def scraper(url, resp):
     # returns the list of is_valid-filtered outbound links
     _, valid_links = process_response(url, resp)
     return valid_links
-
-
-def _parse_for_extraction(url, resp):
-    # runs the guard to check if its worth parsing
-    # builds the soup ONCE + updates and pulls out
-    # get links before text because then it throws away links i might snort
-    if not is_valid(url) or resp.status != 200 or not resp.raw_response:
-        return None, []
-
-    headers = getattr(resp.raw_response, "headers", {}) or {}
-    content_type = headers.get("Content-Type", "") or headers.get("content-type", "")
-    mime = content_type.split(";", 1)[0].strip().lower()
-    if mime and not (mime.startswith("text/")
-                     or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
-        return None, []
-
-    content_length = headers.get("Content-Length") or headers.get("content-length") or ""
-    if content_length.isdigit() and int(content_length) > MAX_BYTES:
-        return None, []
-    raw_bytes = getattr(resp.raw_response, "content", b"") or b""
-    if not (MIN_BYTES <= len(raw_bytes) <= MAX_BYTES):
-        return None, []
-
-    decoded = _decode_content(resp, content_type)
-    if not decoded:
-        return None, []
-
-    soup = BeautifulSoup(decoded, "html.parser")
-
-    # Note: analytics (unique_pages, subdomains, word_freq, longest_page) are
-    # NOT updated here. The worker calls record_page() AFTER the similarity
-    # check, so near-duplicates flagged by simhash don't inflate the counts.
-    raw_links = get_links(url, resp, soup=soup)
-    text = take_text(url, resp, soup=soup)
-    # Free the parse tree immediately. Without this, BS4 keeps the whole tree
-    # alive until GC catches up — under 4 workers that bunched into spikes.
-    soup.decompose()
-    return text, raw_links
 
 
 def process_response(url, resp):
@@ -161,7 +105,7 @@ def take_text(url, resp, soup=None):
             return None
 
         decoded = _decode_content(resp, content_type)
-        if not decoded:
+        if not decoded or _is_useless_content(decoded):
             return None
         soup = BeautifulSoup(decoded, "html.parser")
         # Analytics are now committed via record_page() from the worker
@@ -171,9 +115,6 @@ def take_text(url, resp, soup=None):
     for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
         tag.decompose()
 
-    # Doku renders its sidebar/breadcrumbs/page-tools in divs, not semantic
-    # tags, so the same chrome appears verbatim on every page and tanks the
-    # near-dup hash. Strip the standard dokuwiki containers; no-op elsewhere.
     for tag in soup.select(
         "#dokuwiki__aside, #dokuwiki__pagetools, #dokuwiki__sitetools, "
         "#dw__toc, .breadcrumbs, .trace, .sidebar, .aside, .dw-aside"
@@ -312,3 +253,78 @@ def is_trap(url):
 
     return False
 
+
+# helpers...
+# sorted by how recently i implemented
+
+# its cause one link.
+# https://ics.uci.edu/~zhaoxia/publications/GGWald_manuscript/SourceCode/cases.txt
+# SHOULD NOT COUNT!!!!!!!!
+
+def _is_useless_content(text):
+    tokens = text.split()
+    if len(tokens) < 50:
+        return False  # too short to judge
+    single_char = sum(1 for t in tokens if len(t) == 1)
+    return single_char / len(tokens) > _SINGLE_CHAR_THRESHOLD
+
+
+
+def _decode_content(resp, content_type):
+    """Decode raw response bytes to a string using charset from the Content-Type header.
+    Falls back to the requests-detected encoding, then utf-8."""
+    raw_bytes = getattr(resp.raw_response, "content", None)
+    if not raw_bytes:
+        return None
+
+    charset_match = re.search(r"charset=([A-Za-z0-9_\-]+)", content_type, re.IGNORECASE)
+    encoding = charset_match.group(1) if charset_match else None
+    if not encoding:
+        encoding = getattr(resp.raw_response, "encoding", None)
+    if not encoding:
+        encoding = "utf-8"
+
+    try:
+        return raw_bytes.decode(encoding, errors="replace")
+    except Exception:
+        return raw_bytes.decode("utf-8", errors="replace")
+
+
+
+
+def _parse_for_extraction(url, resp):
+    # runs the guard to check if its worth parsing
+    # builds the soup ONCE + updates and pulls out
+    # get links before text because then it throws away links i might snort
+    if not is_valid(url) or resp.status != 200 or not resp.raw_response:
+        return None, []
+
+    headers = getattr(resp.raw_response, "headers", {}) or {}
+    content_type = headers.get("Content-Type", "") or headers.get("content-type", "")
+    mime = content_type.split(";", 1)[0].strip().lower()
+    if mime and not (mime.startswith("text/")
+                     or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
+        return None, []
+
+    content_length = headers.get("Content-Length") or headers.get("content-length") or ""
+    if content_length.isdigit() and int(content_length) > MAX_BYTES:
+        return None, []
+    raw_bytes = getattr(resp.raw_response, "content", b"") or b""
+    if not (MIN_BYTES <= len(raw_bytes) <= MAX_BYTES):
+        return None, []
+
+    decoded = _decode_content(resp, content_type)
+    if not decoded or _is_useless_content(decoded):
+        return None, []
+
+    soup = BeautifulSoup(decoded, "html.parser")
+
+    # Note: analytics (unique_pages, subdomains, word_freq, longest_page) are
+    # NOT updated here. The worker calls record_page() AFTER the similarity
+    # check, so near-duplicates flagged by simhash don't inflate the counts.
+    raw_links = get_links(url, resp, soup=soup)
+    text = take_text(url, resp, soup=soup)
+    # Free the parse tree immediately. Without this, BS4 keeps the whole tree
+    # alive until GC catches up — under 4 workers that bunched into spikes.
+    soup.decompose()
+    return text, raw_links
