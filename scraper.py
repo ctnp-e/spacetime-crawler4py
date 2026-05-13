@@ -78,18 +78,16 @@ MULTITHREADING!!!!!!!!!!!!!!!
 '''
 
 def scraper(url, resp):
-    """Assignment API entry point. Thin wrapper over process_response —
-    returns the list of is_valid-filtered outbound links."""
+    # Thin wrapper over process_response 
+    # returns the list of is_valid-filtered outbound links
     _, valid_links = process_response(url, resp)
     return valid_links
 
 
 def _parse_for_extraction(url, resp):
-    """Internal workhorse: runs every guard, builds the soup once, updates
-    stats, and pulls out (text, raw_links). Returns (None, []) on any guard
-    miss. Order matters — get_links() must run before take_text() because
-    take_text mutates the soup (decomposes header/footer/nav/aside + doku
-    chrome), which would erase hrefs living in those tags."""
+    # runs the guard to check if its worth parsing
+    # builds the soup ONCE + updates and pulls out
+    # get links before text because then it throws away links i might snort
     if not is_valid(url) or resp.status != 200 or not resp.raw_response:
         return None, []
 
@@ -137,9 +135,8 @@ def _parse_for_extraction(url, resp):
 
 
 def process_response(url, resp):
-    """Worker entry point: returns (text, valid_links) from one parse.
-    Same work as take_text() + scraper.scraper(), minus the double BS4
-    build that was bunching GC pressure under 4 workers."""
+    # for workers to parse
+    # same work as take_text() + scraper.scraper(), but with one BS4 build instead of two
     text, raw_links = _parse_for_extraction(url, resp)
     return text, [link for link in raw_links if is_valid(link)]
 
@@ -164,8 +161,9 @@ def get_links(url, resp, soup=None):
         links.append(link)
     return links
 
-# Pure text extraction. Pass an existing soup to skip re-parsing
-# (process_response and _parse_for_extraction do this).
+# Pure text extraction, callable from Worker for similarity
+# checking before scraping happens. Pass an existing soup to skip re-parsing
+# (extract_next_links does this).
 def take_text(url, resp, soup=None):
     if soup is None:
         # Standalone path (FOR WOKRER))
@@ -325,12 +323,12 @@ def is_trap(url):
             return True
 
     # goodbye all images
-    # TODO : too harsh?
-    # image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff")
-    # for values in query.values():
-    #     for value in values:
-    #         if value.lower().endswith(image_types):
-    #             return True
+    # TODO : too harsh? A : NO!!!!!
+    image_types = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff", ".tif")
+    for values in query.values():
+        for value in values:
+            if value.lower().endswith(image_types):
+                return True
 
     # too many pages likely pagination trap, e.g. ?page=1, ?page=2, ... ?page=10000
     for key, vals in query.items():
