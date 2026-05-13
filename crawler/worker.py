@@ -37,22 +37,26 @@ class Worker(Thread):
                 text = scraper.take_text(tbd_url, resp)
                 duplicate, similarity_type = self.sim.is_similar(tbd_url, text)
 
-                if (text and not duplicate):
+                if duplicate:
+                    # Near/exact dup — skip both link harvest AND content tracking.
+                    # Re-walking dups would just feed the same hrefs back to the
+                    # frontier (already-seen URL dedup catches most, but it's
+                    # wasted work and a near-dup's links rarely point anywhere new).
                     self.logger.info(
-                        f"Downloaded {tbd_url}, status <{resp.status}>, "
-                        f"using cache {self.config.cache_server}.")
-
-                    # continues normally now we know its not a duplicate
+                        f"Skipped {tbd_url} due to {similarity_type} similarity.")
+                else:
+                    # Harvest links regardless of whether take_text yielded meaningful content
+                    if text:
+                        self.logger.info(
+                            f"Downloaded {tbd_url}, status <{resp.status}>, "
+                            f"using cache {self.config.cache_server}.")
+                    else:
+                        self.logger.info(
+                            f"Downloaded {tbd_url} (no extractable text, "
+                            f"harvesting links only), status <{resp.status}>.")
                     scraped_urls = scraper.scraper(tbd_url, resp)
                     for scraped_url in scraped_urls:
                         self.frontier.add_url(scraped_url)
-
-                elif not text:
-                    self.logger.info(
-                        f"Skipped {tbd_url}: no extractable text.")
-                else:
-                    self.logger.info(
-                        f"Skipped {tbd_url} due to {similarity_type} similarity.")
 
             except Exception as e:
                 # log with traceback but make sure it can keep running
