@@ -32,20 +32,18 @@ class Worker(Thread):
                 # download() now self-paces per-host, so no extra sleep needed here.
                 resp = download(tbd_url, self.config, self.logger)
 
-                # take text, and then compare
-                # YOU WANT TO TAKE THE TEXT EVEN IF NEAR DUPLICATE.
-                text = scraper.take_text(tbd_url, resp)
+                # Single-parse path: text + valid_links from one BeautifulSoup build.
+                # Saves the double-parse that bunched GC pressure under 4 workers.
+                text, scraped_urls = scraper.process_response(tbd_url, resp)
                 duplicate, similarity_type = self.sim.is_similar(tbd_url, text)
 
                 if duplicate:
-                    # Near/exact dup — skip both link harvest AND content tracking.
-                    # Re-walking dups would just feed the same hrefs back to the
-                    # frontier (already-seen URL dedup catches most, but it's
-                    # wasted work and a near-dup's links rarely point anywhere new).
                     self.logger.info(
                         f"Skipped {tbd_url} due to {similarity_type} similarity.")
                 else:
-                    # Harvest links regardless of whether take_text yielded meaningful content
+                    # Harvest links regardless of whether text was extractable —
+                    # directory listings / faceted pages have valid hrefs even
+                    # when our chrome-stripping leaves take_text returning "".
                     if text:
                         self.logger.info(
                             f"Downloaded {tbd_url}, status <{resp.status}>, "
@@ -54,7 +52,6 @@ class Worker(Thread):
                         self.logger.info(
                             f"Downloaded {tbd_url} (no extractable text, "
                             f"harvesting links only), status <{resp.status}>.")
-                    scraped_urls = scraper.scraper(tbd_url, resp)
                     for scraped_url in scraped_urls:
                         self.frontier.add_url(scraped_url)
 

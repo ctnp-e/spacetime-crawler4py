@@ -78,79 +78,70 @@ MULTITHREADING!!!!!!!!!!!!!!!
 '''
 
 def scraper(url, resp):
-    links = extract_next_links(url, resp)
-    return [link for link in links if is_valid(link)]
+    """Assignment API entry point. Thin wrapper over process_response —
+    returns the list of is_valid-filtered outbound links."""
+    _, valid_links = process_response(url, resp)
+    return valid_links
 
-def extract_next_links(url, resp):
-    ''' Filter by content quality, parse and return links '''
-    # Implementation required.
-    # url: the URL that was used to get the page
-    # resp.url: the actual url of the page
-    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there was some kind of problem.
-    # resp.error: when status is not 200, you can check the error here, if needed.
-    # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
-    #         resp.raw_response.url: the url, again
-    #         resp.raw_response.content: the content of the page!
-    # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-    # Validation guards up front, so we only parse HTML once we know we want it.
+def _parse_for_extraction(url, resp):
+    """Internal workhorse: runs every guard, builds the soup once, updates
+    stats, and pulls out (text, raw_links). Returns (None, []) on any guard
+    miss. Order matters — get_links() must run before take_text() because
+    take_text mutates the soup (decomposes header/footer/nav/aside + doku
+    chrome), which would erase hrefs living in those tags."""
     if not is_valid(url) or resp.status != 200 or not resp.raw_response:
-        return []
+        return None, []
 
     headers = getattr(resp.raw_response, "headers", {}) or {}
     content_type = headers.get("Content-Type", "") or headers.get("content-type", "")
     mime = content_type.split(";", 1)[0].strip().lower()
     if mime and not (mime.startswith("text/")
                      or mime in {"application/xhtml+xml", "application/xml", "text/xml"}):
-        return []
+        return None, []
 
-    # Body-size guards (see MAX_BYTES / MIN_BYTES at top of file)
     content_length = headers.get("Content-Length") or headers.get("content-length") or ""
     if content_length.isdigit() and int(content_length) > MAX_BYTES:
-        return []
+        return None, []
     raw_bytes = getattr(resp.raw_response, "content", b"") or b""
     if not (MIN_BYTES <= len(raw_bytes) <= MAX_BYTES):
-        return []
+        return None, []
 
-    # Decode bytes → str with explicit charset detection before handing to BS4.
     decoded = _decode_content(resp, content_type)
     if not decoded:
-        return []
+        return None, []
 
-    # Parse once — share the soup between link extraction and text extraction.
     soup = BeautifulSoup(decoded, "html.parser")
 
-    # Record the unique page here too, so direct callers (e.g. test_scraper.py)
-    # update counts. Worker also hits take_text first; sets make it idempotent.
     page_url = urlunparse(urlparse(url)._replace(fragment=""))
     with _stats_lock:
         unique_pages.add(page_url)
         subdomains.setdefault(urlparse(page_url).netloc.lower(), set()).add(page_url)
 
-    # don't want to lose links living inside tags
-    links = get_links(url, resp, soup=soup)
-
+    raw_links = get_links(url, resp, soup=soup)
     text = take_text(url, resp, soup=soup)
 
-    if not text:
-        return links   # don't discard already-found links just because text extraction failed
+    if text:
+        words = text.split()
+        if len(words) >= NUM_WORDS:
+            global longest_page
+            with _stats_lock:
+                if len(words) > longest_page[1]:
+                    longest_page = (page_url, len(words))
+                for w in words:
+                    w = w.lower()
+                    if w.isalpha() and w not in STOP_WORDS:
+                        word_freq[w] += 1
 
-    words = text.split()
+    return text, raw_links
 
-    if len(words) >= NUM_WORDS:
-        global longest_page
-        page_url = urlunparse(urlparse(url)._replace(fragment=""))
 
-        with _stats_lock:
-            if len(words) > longest_page[1]:
-                longest_page = (page_url, len(words))
-
-            for w in words:
-                w = w.lower()
-                if w.isalpha() and w not in STOP_WORDS:
-                    word_freq[w] += 1
-
-    return links
+def process_response(url, resp):
+    """Worker entry point: returns (text, valid_links) from one parse.
+    Same work as take_text() + scraper.scraper(), minus the double BS4
+    build that was bunching GC pressure under 4 workers."""
+    text, raw_links = _parse_for_extraction(url, resp)
+    return text, [link for link in raw_links if is_valid(link)]
 
 def get_links(url, resp, soup=None):
     ''' Extract and return all hyperlinks from the page content.
@@ -158,11 +149,8 @@ def get_links(url, resp, soup=None):
     if soup is None:
         soup = BeautifulSoup(resp.raw_response.content, "html.parser")
 
-    # Pick the right base for relative-href resolution. Without this, Apache
-    # directory pages (frontier-normalized to drop the trailing slash) resolve
-    # 'highlevel/' to '/data/highlevel/' instead of '/data/hepjets/highlevel/',
-    # silently killing entry into the directory's children.
-    # Priority: <base href=...> > post-redirect response URL > requested URL.
+    # Pick the right base for relative-href resolution
+    
     base_tag = soup.find("base", href=True)
     if base_tag and base_tag.get("href"):
         base_url = urljoin(url, base_tag["href"])
@@ -176,9 +164,8 @@ def get_links(url, resp, soup=None):
         links.append(link)
     return links
 
-# Pure text extraction, callable from Worker for similarity
-# checking before scraping happens. Pass an existing soup to skip re-parsing
-# (extract_next_links does this).
+# Pure text extraction. Pass an existing soup to skip re-parsing
+# (process_response and _parse_for_extraction do this).
 def take_text(url, resp, soup=None):
     if soup is None:
         # Standalone path (FOR WOKRER))
