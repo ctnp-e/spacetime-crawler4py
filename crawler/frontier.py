@@ -1,3 +1,4 @@
+import gc
 import os
 import dbm, dbm.dumb
 import shelve
@@ -9,7 +10,7 @@ from queue import Queue, Empty
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid
 
-_SYNC_EVERY = 100  # ops between shelve.sync() flushes — see _maybe_sync
+_SYNC_EVERY = 1000  # ops between shelve.sync() flushes — see _maybe_sync
 
 
 class Frontier(object):
@@ -84,6 +85,7 @@ class Frontier(object):
         if self._sync_counter >= _SYNC_EVERY:
             self._sync_counter = 0
             self.save.sync()
+            gc.collect()
 
     def add_url(self, url):
         url = normalize(url)

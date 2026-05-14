@@ -24,7 +24,7 @@ subdomains = {}         # netloc -> count of unique pages (int, not set of URLs)
 _stats_lock = threading.Lock()
 
 # Periodic snapshot of the report so SIGKILL/OOM doesn't wipe out the run
-_CHECKPOINT_EVERY = 200
+_CHECKPOINT_EVERY = 50
 _checkpoint_counter = 0
 _checkpoint_lock = threading.Lock()
 
